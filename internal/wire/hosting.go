@@ -43,6 +43,10 @@ type HostedSession struct {
 	// to its node only (#348): a node that starts over continues counting
 	// from it. Zero when the host has not seen one.
 	LastRun int `json:"last_run,omitempty"`
+	// DirRoot is the grant root a role's record was added under (#369),
+	// empty for the admin's records. Its node launches the session only
+	// when Directory, with symbolic links resolved, is still under it.
+	DirRoot string `json:"dir_root,omitempty"`
 	// Slot is the numbered slot the session's plugin holds (the host's
 	// list only; nodes never get it), and Presence what it says:
 	// PresenceOnline while its lease runs, PresenceProcessAlive when the

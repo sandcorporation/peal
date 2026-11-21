@@ -241,6 +241,12 @@ func ValidID(id string) bool { return idPattern.MatchString(id) }
 // Create validates and stores a new record with a fresh id and agent
 // session id.
 func (s *Service) Create(c wire.HostedSessionCreate) (wire.HostedSession, error) {
+	return s.create(c, "")
+}
+
+// create is Create of a record added under dirRoot (a role's grant root,
+// #369; empty for the admin's records).
+func (s *Service) create(c wire.HostedSessionCreate, dirRoot string) (wire.HostedSession, error) {
 	if err := s.validate(&c); err != nil {
 		return wire.HostedSession{}, err
 	}
@@ -257,6 +263,7 @@ func (s *Service) Create(c wire.HostedSessionCreate) (wire.HostedSession, error)
 		ID: "hs_" + suffix, Node: c.Node, Base: c.Base, Label: c.Label, Parent: c.Parent, Profile: c.Profile,
 		Directory: c.Directory, AgentSessionID: sid, Args: c.Args, Env: c.Env, Restart: c.Restart, Desired: c.Desired,
 		Class: c.Class, AcceptingWork: true, SkipPermissions: c.SkipPermissions == nil || *c.SkipPermissions, Cols: defaultCols, Rows: defaultRows, CreatedAt: now, UpdatedAt: now, Runtime: unknownRuntime(),
+		DirRoot: dirRoot,
 	}
 	args, _ := json.Marshal(h.Args)
 	env, _ := json.Marshal(h.Env)
@@ -271,8 +278,8 @@ func (s *Service) Create(c wire.HostedSessionCreate) (wire.HostedSession, error)
 	if err != nil {
 		return wire.HostedSession{}, err
 	}
-	res, err := s.db.Exec(`INSERT INTO hosted_sessions(id,node,base,label,parent,profile,directory,agent_session_id,launched,args,env,restart,desired,class,skip_permissions,cols,rows,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,? WHERE ?<>? OR `+cond,
-		append([]any{h.ID, h.Node, h.Base, h.Label, h.Parent, h.Profile, h.Directory, h.AgentSessionID, string(args), string(env), h.Restart, h.Desired, h.Class, boolInt(h.SkipPermissions), h.Cols, h.Rows, now, now, h.Desired, DesiredRunning}, gargs...)...)
+	res, err := s.db.Exec(`INSERT INTO hosted_sessions(id,node,base,label,parent,profile,directory,agent_session_id,launched,args,env,restart,desired,class,skip_permissions,cols,rows,created_at,updated_at,dir_root) SELECT ?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,? WHERE ?<>? OR `+cond,
+		append([]any{h.ID, h.Node, h.Base, h.Label, h.Parent, h.Profile, h.Directory, h.AgentSessionID, string(args), string(env), h.Restart, h.Desired, h.Class, boolInt(h.SkipPermissions), h.Cols, h.Rows, now, now, h.DirRoot, h.Desired, DesiredRunning}, gargs...)...)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return wire.HostedSession{}, ErrDuplicate
 	}
@@ -295,7 +302,7 @@ func boolInt(b bool) int {
 
 func unknownRuntime() wire.HostedRuntime { return wire.HostedRuntime{State: StateUnknown} }
 
-const sessionColumns = `id,node,base,label,parent,profile,directory,agent_session_id,launched,args,env,restart,desired,class,skip_permissions,cols,rows,restart_gen,start_gen,created_at,updated_at`
+const sessionColumns = `id,node,base,label,parent,profile,directory,agent_session_id,launched,args,env,restart,desired,class,skip_permissions,cols,rows,restart_gen,start_gen,created_at,updated_at,dir_root`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -303,7 +310,7 @@ func scanSession(r rowScanner) (wire.HostedSession, error) {
 	var h wire.HostedSession
 	var launched, skip int
 	var args, env string
-	if err := r.Scan(&h.ID, &h.Node, &h.Base, &h.Label, &h.Parent, &h.Profile, &h.Directory, &h.AgentSessionID, &launched, &args, &env, &h.Restart, &h.Desired, &h.Class, &skip, &h.Cols, &h.Rows, &h.RestartGen, &h.StartGen, &h.CreatedAt, &h.UpdatedAt); err != nil {
+	if err := r.Scan(&h.ID, &h.Node, &h.Base, &h.Label, &h.Parent, &h.Profile, &h.Directory, &h.AgentSessionID, &launched, &args, &env, &h.Restart, &h.Desired, &h.Class, &skip, &h.Cols, &h.Rows, &h.RestartGen, &h.StartGen, &h.CreatedAt, &h.UpdatedAt, &h.DirRoot); err != nil {
 		return h, err
 	}
 	h.Launched = launched != 0

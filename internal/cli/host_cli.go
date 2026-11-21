@@ -19,6 +19,12 @@ func cliHost(p parsedArgs, stdout io.Writer) (int, error) {
 	if action == "auto" {
 		return cliHostAuto(p, stdout)
 	}
+	if action == "grant" || action == "revoke-grant" {
+		return cliHostGrant(p, stdout)
+	}
+	if _, ok := p.values["--dir-root"]; ok {
+		return 0, usagef("host %s: --dir-root is for host grant", action)
+	}
 	if len(p.pos) > 2 {
 		return 0, usagef("host %s: unexpected argument %q", action, p.pos[2])
 	}
@@ -93,12 +99,15 @@ func cliHost(p parsedArgs, stdout io.Writer) (int, error) {
 			return 0, usagef("host %s: arguments after -- are for host add", action)
 		}
 	default:
-		return 0, usagef("host: unknown action %q (add, list, set, start, stop, restart, new-conversation, remove, limit)", action)
+		return 0, usagef("host: unknown action %q (add, list, set, start, stop, restart, new-conversation, remove, limit, grant, revoke-grant)", action)
 	}
 	add := wire.HostedSessionCreate{
 		Node: p.values["--node"], Base: p.values["--base"], Profile: p.values["--profile"], Directory: p.values["--dir"],
 		Label: p.values["--label"], Parent: p.values["--parent"], Restart: p.values["--restart"], Class: p.values["--class"], Args: p.extra,
 		SkipPermissions: skip,
+	}
+	if !adminHost() {
+		return hostAsRole(action, id, add, p.bool("--json"), stdout)
 	}
 	return host(action, id, add, p.bool("--json"), stdout)
 }
@@ -186,6 +195,9 @@ func cliHostAuto(p parsedArgs, stdout io.Writer) (int, error) {
 				c.Notify = append(c.Notify, role)
 			}
 		}
+	}
+	if !adminHost() {
+		return hostAutoAsRole()
 	}
 	if hostAuto == nil {
 		return 0, usagef("host auto: not available in this binary")

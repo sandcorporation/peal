@@ -1127,6 +1127,20 @@ Warning: with `PERMS` `skip` the agent runs every tool without asking anyone.
 - Sessions added before this release show `PERMS` `ask` and keep running as before. Turn one on with `sbpc host set <id> --skip-permissions on`; like every change but start and stop, it applies at the next launch, so follow it with `sbpc host restart <id>` (the conversation resumes).
 - The dashboard's 터미널 tab shows the mode in 권한 (건너뜀 / 물음); `GET /api/admin/terminals` carries `skip_permissions`, and `PUT /api/admin/terminals/{id}` with `{"skip_permissions":true}` changes it.
 
+## Sessions a role adds under itself
+
+The admin lets a role (a boss, say) add, start, stop and remove worker sessions under itself with its own token, within a grant:
+
+```sh
+sbpc host grant team/boss --base team/worker --node local,pc2 --dir-root /home/user/work
+sbpc host grant list
+sbpc host revoke-grant team/boss
+```
+
+`--base`, `--node` and `--dir-root` take comma lists or repeat; a new `host grant` for the same role replaces the old one. Revoking leaves the role's sessions in place; only the admin can change them then.
+
+On any machine with the role's profile and no `DB_PATH`, `host add|list|start|stop|remove` run as that role through the server (`SWITCHBOARD_PROFILE=<profile> switchboard host list`; `--profile` of `host add` still names the session's profile on the node). The server refuses (403, naming the condition) a session whose parent is not the role (an empty `--parent` becomes the role), whose base or node is not in the grant, whose class is not `execute` or `review`, that sets env, or whose directory, after `.` and `..` are resolved (Windows: either separator, any case), is not under a grant root; a start, stop or remove of a session whose parent is another role; and every other `host` action, including `host auto`. `host list` shows only the role's own sessions. The node checks once more at each launch, or refuses it: the directory, with symbolic links resolved, must still be under its grant root, and on `up`'s own node (which uses the profiles its records name) the named profile's role must be the session's base role or one of its numbered slots. The session's 기록 keeps `add` and `remove` with the role's name, and the removal is kept after the session is gone.
+
 ## Operations deployment
 
 The operations deployment (`compose.yaml`, the Jenkins deploy) never sets `SWITCHBOARD_HOSTING`; `internal/config/opsguard_test.go` fails the build if `compose.yaml` does. Terminal hosting runs only in an instance started with `switchboard up` on the PC that runs the sessions.

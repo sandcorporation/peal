@@ -660,6 +660,10 @@ func (n *Node) start(ctx context.Context, r Record, s *state, kind, actor string
 // launch starts r's session and records it as an event of kind asked by
 // actor.
 func (n *Node) launch(ctx context.Context, r Record, s *state, kind, actor string) error {
+	if err := errors.Join(checkDirRoot(r), checkRoleProfile(r, profileDirs())); err != nil {
+		s.Observed = ObservedStopped
+		return fmt.Errorf("node: launch %s refused: %w", TerminalName(r.ID), err)
+	}
 	spec := term.Spec{
 		Name: TerminalName(r.ID),
 		Argv: n.cfg.Argv(r, s.Launched),

@@ -92,15 +92,19 @@ func loopbackAddr(addr string) bool {
 }
 
 // hostingAdminPath reports whether an /api/admin/ path (prefix removed) is a
-// hosting route: terminals… or nodes….
+// hosting route: terminals…, nodes… or host-grants.
 func hostingAdminPath(path string) bool {
-	for _, p := range []string{"terminals", "nodes"} {
+	for _, p := range []string{"terminals", "nodes", "host-grants"} {
 		if rest, ok := strings.CutPrefix(path, p); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
 			return true
 		}
 	}
 	return false
 }
+
+// hostingRolePath reports whether an /api/ path (prefix removed) is the
+// role hosting route (#369): host/….
+func hostingRolePath(path string) bool { return strings.HasPrefix(path, "host/") }
 
 // hostingNodePath reports whether an /api/ path (prefix removed) is the node
 // channel: node/….
@@ -116,6 +120,10 @@ func hostingStub(w http.ResponseWriter) {
 // identified admin past the write guard: the records and the node list, and
 // the stub for the routes of later tickets.
 func (s *Server) hostingAdmin(w http.ResponseWriter, r *http.Request, path string) {
+	if path == "host-grants" {
+		s.hostingService().AdminGrantsAPI(w, r)
+		return
+	}
 	if rest, ok := strings.CutPrefix(path, "terminals"); ok && s.hostingHub().AdminTerminalsAPI(w, r, strings.TrimPrefix(rest, "/")) {
 		return
 	}
@@ -319,6 +327,12 @@ func roleCredentials(db *sql.DB, clock func() time.Time) *hosting.RoleCredential
 // SWITCHBOARD_HOSTING=on), so the operations database never gains records.
 func HostCLI(action, id string, add wire.HostedSessionCreate, jsonOut bool, stdout io.Writer) (int, error) {
 	return withInstanceDB("host", func(svc *hosting.Service) error { return svc.RunCLI(action, id, add, jsonOut, stdout) })
+}
+
+// HostGrantCLI is the binary's `host grant` and `host revoke-grant` (#369):
+// the role grants in DB_PATH (the same rule as `host`).
+func HostGrantCLI(action string, g wire.HostGrant, jsonOut bool, stdout io.Writer) (int, error) {
+	return withInstanceDB("host "+action, func(svc *hosting.Service) error { return svc.RunGrantCLI(action, g, jsonOut, stdout) })
 }
 
 // HostAutoCLI is the binary's `host auto` command: the scheduled runs of
