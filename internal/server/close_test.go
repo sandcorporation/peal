@@ -18,6 +18,10 @@ func closeAs(s *Server, role string, id int64) (int, string) {
 
 func closedJSON(id int64) string { return fmt.Sprintf(`{"id":%d,"closed":true}`, id) }
 
+// withdrawnJSON is the close answer for a directive its recipient had not
+// read (#354).
+func withdrawnJSON(id int64) string { return fmt.Sprintf(`{"id":%d,"closed":true,"withdrawn":true}`, id) }
+
 // The sender closes its own directive (#232): it leaves progress at once,
 // a second close answers the same, and nobody else may close it.
 func TestCloseDirectiveBySender(t *testing.T) {
@@ -41,7 +45,7 @@ func TestCloseDirectiveBySender(t *testing.T) {
 		t.Fatalf("open %v after refused closes, want %d", got, d.ID)
 	}
 	for i := 0; i < 2; i++ {
-		if code, body := closeAs(s, "hq/boss", d.ID); code != 200 || body != closedJSON(d.ID) {
+		if code, body := closeAs(s, "hq/boss", d.ID); code != 200 || body != withdrawnJSON(d.ID) {
 			t.Fatalf("close #%d by sender: %d %s", i+1, code, body)
 		}
 	}
@@ -77,7 +81,7 @@ func TestAdminCloseDirective(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		w := adminWrite(s, "POST", path, "")
 		var got wire.Closed
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got != (wire.Closed{ID: other.ID, Closed: true}) {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got != (wire.Closed{ID: other.ID, Closed: true, Withdrawn: true}) {
 			t.Fatalf("admin close #%d: %d %s", i+1, w.Code, w.Body)
 		}
 	}
@@ -134,11 +138,11 @@ func TestCLIClose(t *testing.T) {
 	h.configure([]string{"--profile", "a"}, "a")
 	h.configure(nil, "b")
 	h.mustRun(nil, "--profile", "a", "send", "--to", "b", "--subject", "work", "--body", "x")
-	if out := h.mustRun(nil, "--profile", "a", "close", "1"); out != "#1 closed" {
+	if out := h.mustRun(nil, "--profile", "a", "close", "1"); out != "#1 closed; withdrawn (the recipient had not read it)" {
 		t.Fatalf("close: %q", out)
 	}
 	var got wire.Closed
-	if out := h.mustRun(nil, "--profile", "a", "close", "1", "--json"); json.Unmarshal([]byte(out), &got) != nil || got != (wire.Closed{ID: 1, Closed: true}) {
+	if out := h.mustRun(nil, "--profile", "a", "close", "1", "--json"); json.Unmarshal([]byte(out), &got) != nil || got != (wire.Closed{ID: 1, Closed: true, Withdrawn: true}) {
 		t.Fatalf("close --json: %q", out)
 	}
 	if r := h.run(nil, "close", "1"); r.code == 0 || !strings.Contains(r.stderr, "403") {

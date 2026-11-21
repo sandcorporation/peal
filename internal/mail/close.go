@@ -2,6 +2,7 @@ package mail
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/sandcorporation/switchboard/internal/identity"
@@ -15,7 +16,9 @@ import (
 // answer: it stores no_reply=1, the flag `send --no-reply` sets, so the
 // progress view, the directive reminders and the sweep that sends them
 // (all through presence openDirectives) drop it on their next read.
-// Closing again answers the same. 404 for no such message, 403 for a
+// A directive its recipient has not read yet is withdrawn instead (#354,
+// withdraw.go): no_reply=1 is stored as well, and the answer says
+// withdrawn. Closing again answers the same. 404 for no such message, 403 for a
 // caller that is not the sender, 400 for mail that is not a directive (a
 // plain reply, or system mail).
 //
@@ -50,11 +53,29 @@ func (s *Service) Close(w http.ResponseWriter, r *http.Request, role string, id 
 		http.Error(w, "not a directive", http.StatusBadRequest)
 		return
 	}
-	if _, err = s.db.Exec(`UPDATE messages SET no_reply=1 WHERE id=? AND no_reply=0`, id); err != nil {
+	var left string
+	var withdrawn bool
+	err = store.InTx(r.Context(), s.db, func(tx *sql.Tx) error {
+		left, withdrawn = "", false
+		if _, err := tx.Exec(`UPDATE messages SET no_reply=1 WHERE id=? AND no_reply=0`, id); err != nil {
+			return err
+		}
+		var e error
+		left, e = withdraw(tx, id, s.now())
+		if errors.Is(e, errAlreadyRead) {
+			return nil // read: only no_reply, as before
+		}
+		withdrawn = e == nil
+		return e
+	})
+	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, wire.Closed{ID: id, Closed: true})
+	if left != "" {
+		s.hub.Publish(left)
+	}
+	writeJSON(w, wire.Closed{ID: id, Closed: true, Withdrawn: withdrawn})
 }
 
 // answeredDirective is the directive m answers when role received m and

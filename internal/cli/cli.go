@@ -162,6 +162,7 @@ var commands = []command{
 	{name: "ack", args: "ID", nargs: 1, summary: "Acknowledge a message", options: []option{optJSON, optProfile}},
 	{name: "complete", args: "ID", nargs: 1, summary: "Mark a message complete", options: []option{optJSON, optProfile}},
 	{name: "close", args: "ID", nargs: 1, summary: "Close a directive you sent: it needs no answer (no longer open, never reminded); given an answer's ID, close the directive it answers and complete the answer", options: []option{optJSON, optProfile}},
+	{name: "withdraw", args: "ID", nargs: 1, summary: "Take back mail you sent that its recipient has not read (409 once read: close it or send new mail)", options: []option{optJSON, optProfile}},
 	{name: "slots", summary: "List the leased numbered slots under the active role's base",
 		options: []option{optJSON, optProfile}},
 	{name: "slot", args: "ACTION", nargs: 1, synopsis: "(ACTION: register | heartbeat | takeover | release)",
@@ -563,11 +564,24 @@ func dispatch(args []string) (int, error) {
 		if e = json.Unmarshal(b, &out); e != nil {
 			return 0, fmt.Errorf("unexpected response from server: %v", e)
 		}
-		if out.Completed != 0 {
+		switch {
+		case out.Completed != 0:
 			fmt.Printf("#%d closed; #%d complete\n", out.ID, out.Completed)
-		} else {
-			fmt.Printf("#%d closed\n", out.ID)
+		case out.Withdrawn:
+			fmt.Printf("#%d closed; withdrawn (the recipient had not read it)\n", out.ID)
+		default:
+			fmt.Printf("#%d closed; the recipient already read it, so it stays in its mailbox marked as needing no answer\n", out.ID)
 		}
+		return ExitOK, nil
+	case "withdraw":
+		if p.bool("--json") {
+			req, _ := http.NewRequest("POST", endpoint(c, "/api/messages/"+p.pos[0]+"/withdraw"), nil)
+			return doRequest(c, req, true)
+		}
+		if _, e := slotCall(c, "POST", "/api/messages/"+p.pos[0]+"/withdraw", nil); e != nil {
+			return 0, e
+		}
+		fmt.Printf("#%s withdrawn\n", p.pos[0])
 		return ExitOK, nil
 	case "reply":
 		body, e := inputBody(p)
@@ -987,8 +1001,14 @@ func cliReply(c Config, req *http.Request, id string, jsonMode bool) (int, error
 		return 0, fmt.Errorf("server returned %s: %s", resp.Status, string(b))
 	}
 	var out wire.Message
-	if json.Unmarshal(b, &out) == nil && out.DirectiveState == "open" {
-		fmt.Fprintln(os.Stderr, ReplyOpenNote(id))
+	if json.Unmarshal(b, &out) == nil {
+		out.NoSession = false // a reply prints only the #354 lines
+		for _, line := range RecipientNotes(out.Recipient, out) {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		if out.DirectiveState == "open" {
+			fmt.Fprintln(os.Stderr, ReplyOpenNote(id))
+		}
 	}
 	return printResponse(b, jsonMode), nil
 }
@@ -1070,15 +1090,41 @@ func cliSend(c Config, p parsedArgs) (int, error) {
 	return doRequestWith(c, req, p.bool("--json"), noSessionNote(p.values["--to"]))
 }
 
-// noSessionNote returns a hook for the send response: one line on stderr when
-// the server says no session of the recipient role is attached (#300).
+// noSessionNote returns a hook for the send response: the lines of
+// RecipientNotes on stderr (#300, #354).
 func noSessionNote(to string) func([]byte) {
 	return func(b []byte) {
 		var m wire.Message
-		if json.Unmarshal(b, &m) == nil && m.NoSession {
-			fmt.Fprintf(os.Stderr, "no session of %s is attached; the mail waits in its inbox\n", to)
+		if json.Unmarshal(b, &m) != nil {
+			return
+		}
+		for _, line := range RecipientNotes(to, m) {
+			fmt.Fprintln(os.Stderr, line)
 		}
 	}
+}
+
+// RecipientNotes are the lines a send or reply prints about the receiving
+// mailbox: nothing when a session reads it; that its last session ended and
+// the mail is held for it; the live numbered slots when slot 1 of a base is
+// empty; else, from servers before #354 too, that no session of the role is
+// attached.
+func RecipientNotes(to string, m wire.Message) []string {
+	st := m.RecipientState
+	if st != nil && st.Live {
+		return nil
+	}
+	var out []string
+	if st != nil && st.Held {
+		out = append(out, fmt.Sprintf("받는 세션 없음: %s, 마지막 세션 %d분 전 끝남. 붙잡아 둠", st.Mailbox, st.EndedS/60))
+	}
+	if st != nil && len(st.LiveSlots) > 0 {
+		out = append(out, fmt.Sprintf("%s 이 살아 있음. 그 슬롯 이름으로 보내라", strings.Join(st.LiveSlots, ", ")))
+	}
+	if len(out) == 0 && m.NoSession {
+		out = append(out, fmt.Sprintf("no session of %s is attached; the mail waits in its inbox", to))
+	}
+	return out
 }
 
 func listURL(c Config, box, q, status string) string {

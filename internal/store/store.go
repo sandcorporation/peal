@@ -405,6 +405,7 @@ var LabelColumns = []struct{ Name, Def string }{
 	{"held_at", `TEXT`},        // RFC 3339; when the message was held
 	{"delivered_at", `TEXT`},   // RFC 3339; when held mail moved to a session
 	{"held_notice_at", `TEXT`}, // RFC 3339; for telling the sender nobody connected (not set here)
+	{"withdrawn_at", `TEXT`},   // RFC 3339; when the sender took the unread mail back (#354)
 }
 
 func migrateLabels(db *sql.DB) error {
