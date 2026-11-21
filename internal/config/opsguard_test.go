@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -76,18 +77,81 @@ func operationsFiles(t *testing.T, root string) []string {
 	return files
 }
 
-// TestOperationsConfigNeverEnablesHosting keeps terminal hosting (#173) out
-// of the operations instance: no deployment file may name its settings.
-func TestOperationsConfigNeverEnablesHosting(t *testing.T) {
+// addrRE matches an address written out in a value: an IPv4 address or
+// range, an IPv6 address or range, localhost, a URL, or host:port.
+var addrRE = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b|([0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{0,4}|[0-9A-Fa-f]{0,4}::[0-9A-Fa-f]{0,4}|(?i:localhost)|://|[A-Za-z0-9.\]-]+:\d{1,5}\b`)
+
+// composeHostingRE is the one form a compose file may set a hosting
+// variable in: its value comes from the deploy .env, empty by default.
+var composeHostingRE = regexp.MustCompile(`^\s*(-\s*)?["']?` + hostingNameRE.String() + `["']?\s*[:=]\s*["']?\$\{` + hostingNameRE.String() + `:-\}["']?\s*$`)
+
+// hostingLineProblem is why one line of an operations file breaks the
+// hosting rule (#181, #366 §2), or "": hosting settings may be named, but
+// never carry an address, and a compose file passes them through only as
+// ${NAME:-}. The value is whatever follows the first hosting name.
+func hostingLineProblem(line string, compose bool) string {
+	loc := hostingNameRE.FindStringIndex(line)
+	if loc == nil {
+		return ""
+	}
+	if m := addrRE.FindString(line[loc[1]:]); m != "" {
+		return "carries the address " + strconv.Quote(m) + "; addresses belong in the deploy .env"
+	}
+	if compose && !composeHostingRE.MatchString(line) {
+		return "sets a hosting variable other than as ${NAME:-} (empty default, value from the deploy .env)"
+	}
+	return ""
+}
+
+// TestOperationsConfigHostingCarriesNoAddress: the operations files may name
+// SWITCHBOARD_HOSTING* (the deploy .env turns hosting on), but never write
+// an address into them, and compose passes them through empty by default.
+func TestOperationsConfigHostingCarriesNoAddress(t *testing.T) {
 	root := repoRoot(t)
 	for _, f := range operationsFiles(t, root) {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if names := hostingNameRE.FindAllString(string(b), -1); len(names) > 0 {
-			rel, _ := filepath.Rel(root, f)
-			t.Errorf("%s names %v: hosting must never be configured on the operations instance", rel, names)
+		rel, _ := filepath.Rel(root, f)
+		compose := strings.HasPrefix(filepath.Base(f), "compose")
+		for i, line := range strings.Split(string(b), "\n") {
+			if why := hostingLineProblem(line, compose); why != "" {
+				t.Errorf("%s:%d %s", rel, i+1, why)
+			}
+		}
+	}
+}
+
+func TestHostingLineProblem(t *testing.T) {
+	for _, c := range []struct {
+		line    string
+		compose bool
+		bad     bool
+	}{
+		{"      SWITCHBOARD_HOSTING: ${SWITCHBOARD_HOSTING:-}", true, false},
+		{"      - SWITCHBOARD_HOSTING_TERMINAL=${SWITCHBOARD_HOSTING_TERMINAL:-}", true, false},
+		{`      SWITCHBOARD_HOSTING_REMOTE_LISTEN: "${SWITCHBOARD_HOSTING_REMOTE_LISTEN:-}"`, true, false},
+		{"      SWITCHBOARD_HOSTING: on", true, true},
+		{"      SWITCHBOARD_HOSTING: ${SWITCHBOARD_HOSTING:-on}", true, true},
+		{"      SWITCHBOARD_HOSTING_REMOTE_LISTEN: ${SWITCHBOARD_HOSTING_REMOTE_LISTEN:-192.0.2.10:8091}", true, true},
+		{"ENV SWITCHBOARD_HOSTING=on", false, false},
+		{"    SWITCHBOARD_HOSTING_MAX: 4", false, false},
+		{"sh 'echo ${env.SWITCHBOARD_HOSTING_AGENT}'", false, false},
+		{"      SWITCHBOARD_ADMIN_AUTH: builtin", true, false},
+		{"LISTEN_ADDR=192.0.2.10:8080", false, false},
+		{"SWITCHBOARD_HOSTING_REMOTE_LISTEN=192.0.2.10:8091", false, true},
+		{"SWITCHBOARD_HOSTING_REMOTE_ALLOW=192.0.2.0/24", false, true},
+		{"SWITCHBOARD_HOSTING_TERMINAL_ALLOW=2001:db8::/32", false, true},
+		{"SWITCHBOARD_HOSTING_TERMINAL_ALLOW: fd00:1:2:3::/64", false, true},
+		{"SWITCHBOARD_HOSTING_REMOTE_LISTEN=[::1]:8091", false, true},
+		{"SWITCHBOARD_HOSTING_REMOTE_LISTEN=localhost:8091", false, true},
+		{"SWITCHBOARD_HOSTING_REMOTE_LISTEN=pc.example:8091", false, true},
+		{"SWITCHBOARD_HOSTING_URL=http://pc.example", false, true},
+		{"AGENT_MAIL_HOSTING_REMOTE_LISTEN=192.0.2.10:8091", false, true},
+	} {
+		if got := hostingLineProblem(c.line, c.compose) != ""; got != c.bad {
+			t.Errorf("%q (compose %v): flagged %v, want %v", c.line, c.compose, got, c.bad)
 		}
 	}
 }

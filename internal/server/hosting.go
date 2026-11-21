@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sandcorporation/switchboard/internal/adminauth"
 	"github.com/sandcorporation/switchboard/internal/config"
 	"github.com/sandcorporation/switchboard/internal/dashboard"
 	"github.com/sandcorporation/switchboard/internal/hosting"
@@ -26,8 +25,9 @@ import (
 )
 
 // Terminal hosting (#173) is compiled in but off. SWITCHBOARD_HOSTING=on turns
-// it on; the operations instance never sets it (internal/config guard test).
-// While off, no hosting route, table, tab or live kind is observable.
+// it on; the operations files may name it but never carry an address
+// (internal/config guard test). While off, no hosting route, table, tab or
+// live kind is observable.
 
 const (
 	defaultListenAddr = ":8080"
@@ -35,49 +35,26 @@ const (
 )
 
 // hostingStart reads SWITCHBOARD_HOSTING and, when it is on, refuses an
-// unsafe start: the listen address must be loopback, the admin mode must sign
-// admins in (builtin or oidc), and DB_PATH must name a database other than
-// the container default; a remote listener (hostingRemote) must be a
-// private-network address. The error names every failing condition.
+// unsafe start: a remote listener must pass hostingRemote, and the browser
+// terminal settings must pass terminalStart (which also asks for admin
+// sign-in when the terminal is not loopback-only). The error names every
+// failing condition.
 func hostingStart(getenv func(string) string) (bool, error) {
 	on, from := config.HostingFrom(getenv)
 	if !on {
 		return false, nil
 	}
 	var failed []string
-	addr := getenv("LISTEN_ADDR")
-	if addr == "" {
-		addr = defaultListenAddr
-	}
-	if !loopbackAddr(addr) {
-		failed = append(failed, "LISTEN_ADDR "+addr+" is not a loopback address (127.0.0.0/8, ::1 or localhost)")
-	}
 	if _, err := hostingRemote(getenv); err != nil {
 		failed = append(failed, err.Error())
 	}
 	if err := terminalStart(getenv); err != nil {
 		failed = append(failed, err.Error())
 	}
-	if mode := getenv(config.EnvPrefix + "ADMIN_AUTH"); !adminauth.SignsIn(mode) {
-		failed = append(failed, config.EnvPrefix+"ADMIN_AUTH must be builtin or oidc (got "+quoteOrUnset(mode)+")")
-	}
-	switch db := getenv("DB_PATH"); {
-	case db == "":
-		failed = append(failed, "DB_PATH is unset; name this instance's own database")
-	case filepath.ToSlash(filepath.Clean(db)) == containerDBPath:
-		failed = append(failed, "DB_PATH is the container default "+containerDBPath+"; name this instance's own database")
-	}
 	if len(failed) > 0 {
 		return true, errors.New(from + "=on refused: " + strings.Join(failed, "; "))
 	}
 	return true, nil
-}
-
-func quoteOrUnset(v string) string {
-	if strings.TrimSpace(v) == "" {
-		return "unset"
-	}
-	return `"` + v + `"`
 }
 
 // loopbackAddr reports whether a listen address binds only loopback. An empty

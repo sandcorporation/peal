@@ -20,7 +20,7 @@ import (
 
 func TestHostingRemoteListenRefusals(t *testing.T) {
 	t.Parallel()
-	ok := map[string]string{"SWITCHBOARD_HOSTING": "on", "LISTEN_ADDR": "127.0.0.1:8090", "SWITCHBOARD_ADMIN_AUTH": "builtin", "DB_PATH": "/home/me/switchboard-pc/mail.db"}
+	ok := map[string]string{"SWITCHBOARD_HOSTING": "on", "SWITCHBOARD_HOSTING_REMOTE_ALLOW": "100.64.0.0/10,2001:db8:1::/48"} // leak-guard:allow
 	with := func(kv ...string) map[string]string {
 		m := map[string]string{}
 		for a, b := range ok {
@@ -38,10 +38,12 @@ func TestHostingRemoteListenRefusals(t *testing.T) {
 		want string // "" means the start is permitted
 	}{
 		{"unset", ok, ""},
-		{"tailscale ipv4", with(listen, "100.64.0.10:8091"), ""}, // leak-guard:allow
-		{"tailscale ipv6", with(listen, "[fd7a:115c:a1e9::10]:8091"), ""},
+		{"range ipv4", with(listen, "100.64.0.10:8091"), ""}, // leak-guard:allow
+		{"range ipv6", with(listen, "[2001:db8:1::10]:8091"), ""},
 		{"own range", with(listen, "192.0.2.10:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", "192.0.2.0/24"), ""},
-		{"outside the range", with(listen, "192.0.2.10:8091"), listen + " 192.0.2.10:8091 is outside SWITCHBOARD_HOSTING_REMOTE_ALLOW (100.64.0.0/10,fd7a:115c:a1e9::/48)"}, // leak-guard:allow
+		{"outside the range", with(listen, "192.0.2.10:8091"), listen + " 192.0.2.10:8091 is outside SWITCHBOARD_HOSTING_REMOTE_ALLOW (100.64.0.0/10,2001:db8:1::/48)"}, // leak-guard:allow
+		{"no range, any address", with(listen, "192.0.2.10:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", ""), ""},
+		{"no range, ipv6", with(listen, "[2001:db8::10]:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", " "), ""},
 		{"all ipv4", with(listen, "0.0.0.0:8091"), listen + " 0.0.0.0:8091 binds every interface"},
 		{"all ipv6", with(listen, "[::]:8091"), listen + " [::]:8091 binds every interface"},
 		{"empty host", with(listen, ":8091"), listen + " :8091 binds every interface"},
@@ -51,7 +53,7 @@ func TestHostingRemoteListenRefusals(t *testing.T) {
 		{"no port", with(listen, "100.64.0.10"), listen + ` "100.64.0.10" is not IP:port`},                                                                                  // leak-guard:allow
 		{"bad port", with(listen, "100.64.0.10:x"), listen + ` "100.64.0.10:x" is not IP:port`},                                                                             // leak-guard:allow
 		{"bad range", with(listen, "100.64.0.10:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", "nonsense"), `SWITCHBOARD_HOSTING_REMOTE_ALLOW: "nonsense" is not a CIDR range`}, // leak-guard:allow
-		{"listen not loopback", with(listen, "100.64.0.10:8091", "LISTEN_ADDR", "100.64.0.10:8090"), "LISTEN_ADDR 100.64.0.10:8090 is not a loopback address"},              // leak-guard:allow
+		{"listen not loopback", with(listen, "100.64.0.10:8091", "LISTEN_ADDR", "100.64.0.10:8090"), ""},                                                                    // leak-guard:allow
 	} {
 		on, err := hostingStart(fakeEnv(c.env))
 		if !on {
@@ -65,17 +67,20 @@ func TestHostingRemoteListenRefusals(t *testing.T) {
 		}
 	}
 	// Two failures are named in one refusal, as the other conditions are.
-	_, err := hostingStart(fakeEnv(with(listen, "0.0.0.0:8091", "DB_PATH", "")))
-	if err == nil || !strings.Contains(err.Error(), "binds every interface (give one private-network address); DB_PATH is unset") {
+	_, err := hostingStart(fakeEnv(with(listen, "0.0.0.0:8091", "SWITCHBOARD_HOSTING_TERMINAL", "on")))
+	if err == nil || !strings.Contains(err.Error(), "binds every interface (give one IP address); SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in") {
 		t.Errorf("two failures: %v", err)
 	}
 	if r, err := hostingRemote(fakeEnv(with(listen, "100.64.0.10:8091"))); err != nil || r.addr != "100.64.0.10:8091" || len(r.allow) != 2 { // leak-guard:allow
 		t.Errorf("settings = %+v %v", r, err)
 	}
+	if r, err := hostingRemote(fakeEnv(with(listen, "192.0.2.10:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", ""))); err != nil || r.addr != "192.0.2.10:8091" || r.allow != nil {
+		t.Errorf("no range: settings = %+v %v", r, err)
+	}
 }
 
 // peerAs serves h as if every request came from peer: the remote listener
-// tests run on loopback, where CI cannot bind a private-network address.
+// tests run on loopback, where CI cannot bind another address.
 func peerAs(peer string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr = peer
@@ -83,9 +88,18 @@ func peerAs(peer string, h http.Handler) http.Handler {
 	})
 }
 
+// testRemoteAllow is the SWITCHBOARD_HOSTING_REMOTE_ALLOW of the remote
+// listener tests.
+var testRemoteAllow = []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("2001:db8:1::/48")} // leak-guard:allow
+
 func remoteServer(t *testing.T, s *Server, peer string) string {
 	t.Helper()
-	srv := httptest.NewServer(peerAs(peer, s.remoteHandler([]netip.Prefix{netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e9::/48")}))) // leak-guard:allow
+	return remoteServerAllow(t, s, peer, testRemoteAllow)
+}
+
+func remoteServerAllow(t *testing.T, s *Server, peer string, allow []netip.Prefix) string {
+	t.Helper()
+	srv := httptest.NewServer(peerAs(peer, s.remoteHandler(allow)))
 	t.Cleanup(srv.Close)
 	return srv.URL
 }
@@ -182,7 +196,7 @@ func TestHostingRemoteListenerServesNodesAndRolesOnly(t *testing.T) {
 func TestHostingRemoteListenerRefusesPeersOutsideTheRange(t *testing.T) {
 	t.Parallel()
 	s, _, _ := signedInServer(t, true)
-	if got := roleCall(t, remoteServer(t, s, "[fd7a:115c:a1e9::11]:40000"), "GET", "/api/messages", "secret-b", "b", nil, nil); got.code != http.StatusOK {
+	if got := roleCall(t, remoteServer(t, s, "[2001:db8:1::11]:40000"), "GET", "/api/messages", "secret-b", "b", nil, nil); got.code != http.StatusOK {
 		t.Errorf("ipv6 peer in range = %d %s", got.code, got.body)
 	}
 	for _, peer := range []string{"192.0.2.5:40000", "127.0.0.1:40000", "[::1]:40000", "[2001:db8::1]:40000", "garbage"} {
@@ -199,10 +213,10 @@ func TestHostingRemoteListenerRefusesPeersOutsideTheRange(t *testing.T) {
 // every address is inside the allowed ranges.
 func TestCheckNodeHost(t *testing.T) {
 	t.Parallel()
-	allow := []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e9::/48")} // leak-guard:allow
+	allow := testRemoteAllow
 	names := map[string][]string{
-		"pc.example":      {"100.64.0.10", "fd7a:115c:a1e9::10"}, // leak-guard:allow
-		"mixed.example":   {"100.64.0.10", "192.0.2.10"},         // leak-guard:allow
+		"pc.example":      {"100.64.0.10", "2001:db8:1::10"}, // leak-guard:allow
+		"mixed.example":   {"100.64.0.10", "192.0.2.10"},     // leak-guard:allow
 		"public.example":  {"192.0.2.10"},
 		"lo.example":      {"127.0.0.1"},
 		"failing.example": nil,
@@ -226,10 +240,10 @@ func TestCheckNodeHost(t *testing.T) {
 		{"http://localhost:8090", ""},
 		{"http://[::1]:8090", ""},
 		{"http://100.64.0.10:8091", ""}, // leak-guard:allow
-		{"https://[fd7a:115c:a1e9::10]:8091", ""},
+		{"https://[2001:db8:1::10]:8091", ""},
 		{"http://pc.example:8091", ""},
 		{"http://lo.example:8091", ""},
-		{"http://192.0.2.10:8091", "node: --host 192.0.2.10 is neither loopback nor inside SWITCHBOARD_HOSTING_REMOTE_ALLOW (100.64.0.0/10,fd7a:115c:a1e9::/48)"}, // leak-guard:allow
+		{"http://192.0.2.10:8091", "node: --host 192.0.2.10 is neither loopback nor inside SWITCHBOARD_HOSTING_REMOTE_ALLOW (100.64.0.0/10,2001:db8:1::/48)"}, // leak-guard:allow
 		{"http://0.0.0.0:8091", "is neither loopback nor inside"},
 		{"http://mixed.example:8091", "node: --host mixed.example resolves to 192.0.2.10, outside SWITCHBOARD_HOSTING_REMOTE_ALLOW"},
 		{"http://public.example:8091", "resolves to 192.0.2.10, outside"},
@@ -244,5 +258,47 @@ func TestCheckNodeHost(t *testing.T) {
 		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
 			t.Errorf("%s: error %v, want %q", c.url, err, c.want)
 		}
+	}
+}
+
+// TestCheckNodeHostWithoutRange: with SWITCHBOARD_HOSTING_REMOTE_ALLOW unset a
+// node attaches to any http(s) host, unresolved; the URL form still counts.
+func TestCheckNodeHostWithoutRange(t *testing.T) {
+	t.Parallel()
+	lookup := func(context.Context, string) ([]netip.Addr, error) {
+		t.Error("lookup called without a range")
+		return nil, errors.New("no lookup")
+	}
+	for _, u := range []string{"http://192.0.2.10:8091", "https://pc.example:8091", "http://[2001:db8::10]:8091", "http://127.0.0.1:8090"} {
+		if err := checkNodeHost(u, nil, lookup); err != nil {
+			t.Errorf("%s: refused: %v", u, err)
+		}
+	}
+	for _, u := range []string{"ftp://192.0.2.10", "192.0.2.10:8091"} {
+		if err := checkNodeHost(u, nil, lookup); err == nil || !strings.Contains(err.Error(), "is not an http:// or https:// URL") {
+			t.Errorf("%s: err %v", u, err)
+		}
+	}
+}
+
+// TestHostingRemoteListenerWithoutRange: with no range every peer reaches
+// the role API; forwarded requests and the admin side stay refused.
+func TestHostingRemoteListenerWithoutRange(t *testing.T) {
+	t.Parallel()
+	s, _, _ := signedInServer(t, true)
+	for _, peer := range []string{"192.0.2.5:40000", "[2001:db8::1]:40000", "100.64.0.10:40000"} { // leak-guard:allow
+		remote := remoteServerAllow(t, s, peer, nil)
+		if got := roleCall(t, remote, "GET", "/api/messages", "secret-b", "b", nil, nil); got.code != http.StatusOK {
+			t.Errorf("peer %s = %d %s", peer, got.code, got.body)
+		}
+		if got := roleCall(t, remote, "GET", "/api/admin/settings", "secret-b", "b", nil, nil); got.code != http.StatusNotFound {
+			t.Errorf("peer %s admin = %d %s", peer, got.code, got.body)
+		}
+		if got := roleCall(t, remote, "GET", "/api/messages", "secret-b", "b", nil, map[string]string{"X-Forwarded-For": "192.0.2.6"}); got.code != http.StatusForbidden {
+			t.Errorf("peer %s forwarded = %d %s", peer, got.code, got.body)
+		}
+	}
+	if got := roleCall(t, remoteServerAllow(t, s, "garbage", nil), "GET", "/api/messages", "secret-b", "b", nil, nil); got.code != http.StatusForbidden {
+		t.Errorf("unparsable peer = %d %s", got.code, got.body)
 	}
 }

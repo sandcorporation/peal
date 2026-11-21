@@ -64,9 +64,16 @@ func TestWithoutOwnEnvDropsBothPrefixes(t *testing.T) {
 }
 
 func TestHostingRemoteAllow(t *testing.T) {
-	allow, from, err := HostingRemoteAllow(fakeEnv(nil))
-	if err != nil || from != "SWITCHBOARD_HOSTING_REMOTE_ALLOW" || len(allow) != 2 || allow[0].String() != "100.64.0.0/10" || allow[1].String() != "fd7a:115c:a1e9::/48" { // leak-guard:allow
-		t.Fatalf("default = %v %q %v", allow, from, err)
+	// No default range: unset or blank is no limit (#366 §2).
+	for _, v := range []string{"", "  "} {
+		allow, from, err := HostingRemoteAllow(fakeEnv(map[string]string{"SWITCHBOARD_HOSTING_REMOTE_ALLOW": v}))
+		if err != nil || from != "SWITCHBOARD_HOSTING_REMOTE_ALLOW" || allow != nil {
+			t.Fatalf("%q = %v %q %v, want no limit", v, allow, from, err)
+		}
+	}
+	allow, _, err := HostingRemoteAllow(fakeEnv(nil))
+	if err != nil || allow != nil {
+		t.Fatalf("unset = %v %v, want no limit", allow, err)
 	}
 	allow, _, err = HostingRemoteAllow(fakeEnv(map[string]string{"SWITCHBOARD_HOSTING_REMOTE_ALLOW": " 192.0.2.0/24 , 2001:db8::/32 "}))
 	if err != nil || len(allow) != 2 {

@@ -392,6 +392,8 @@ func TestHostingStartChecksTerminalSetting(t *testing.T) {
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "on"}, false},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "on", "SWITCHBOARD_ADMIN_PROXY_TOKEN": "proxy-secret"}, true},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "on", "SWITCHBOARD_ADMIN_AUTH": "oidc"}, true},
+		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "off"}, false},
+		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "off", "SWITCHBOARD_ADMIN_AUTH": "builtin"}, true},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "loopback"}, true},
 		{map[string]string{}, true},
 	} {

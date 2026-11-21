@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sandcorporation/switchboard/internal/store"
 )
 
 // hostingPaths are the hosting routes (#173 API) a request may name.
@@ -181,18 +183,21 @@ func TestAdminBootstrapReportsHosting(t *testing.T) {
 func TestHostingStartRefusals(t *testing.T) {
 	t.Parallel()
 	ok := map[string]string{"SWITCHBOARD_HOSTING": "on", "LISTEN_ADDR": "127.0.0.1:8090", "SWITCHBOARD_ADMIN_AUTH": "builtin", "DB_PATH": "/home/me/switchboard-pc/mail.db"}
-	with := func(k, v string) map[string]string {
+	with := func(kv ...string) map[string]string {
 		m := map[string]string{}
 		for a, b := range ok {
 			m[a] = b
 		}
-		if v == "" {
-			delete(m, k)
-		} else {
-			m[k] = v
+		for i := 0; i+1 < len(kv); i += 2 {
+			if kv[i+1] == "" {
+				delete(m, kv[i])
+			} else {
+				m[kv[i]] = kv[i+1]
+			}
 		}
 		return m
 	}
+	const term = "SWITCHBOARD_HOSTING_TERMINAL"
 	for _, c := range []struct {
 		name string
 		env  map[string]string
@@ -200,26 +205,28 @@ func TestHostingStartRefusals(t *testing.T) {
 	}{
 		{"permitted", ok, ""},
 		{"oidc", with("SWITCHBOARD_ADMIN_AUTH", "oidc"), ""},
-		{"loopback 127.0.0.2", with("LISTEN_ADDR", "127.0.0.2:8090"), ""},
-		{"loopback ::1", with("LISTEN_ADDR", "[::1]:8090"), ""},
-		{"localhost", with("LISTEN_ADDR", "localhost:8090"), ""},
-		{"empty host", with("LISTEN_ADDR", ":8090"), "LISTEN_ADDR :8090 is not a loopback address"},
-		{"listen unset", with("LISTEN_ADDR", ""), "LISTEN_ADDR :8080 is not a loopback address"},
-		{"all interfaces", with("LISTEN_ADDR", "0.0.0.0:8090"), "LISTEN_ADDR 0.0.0.0:8090 is not a loopback address"},
-		{"private address", with("LISTEN_ADDR", "192.0.2.10:8090"), "not a loopback address"},
-		{"name", with("LISTEN_ADDR", "pc.example:8090"), "not a loopback address"},
-		{"admin unset", with("SWITCHBOARD_ADMIN_AUTH", ""), "SWITCHBOARD_ADMIN_AUTH must be builtin or oidc (got unset)"},
-		{"admin proxy", with("SWITCHBOARD_ADMIN_AUTH", "proxy"), `SWITCHBOARD_ADMIN_AUTH must be builtin or oidc (got "proxy")`},
-		{"db unset", with("DB_PATH", ""), "DB_PATH is unset"},
-		{"db container default", with("DB_PATH", "/data/mail.db"), "DB_PATH is the container default /data/mail.db"},
-		{"db container default unclean", with("DB_PATH", "/data//mail.db"), "DB_PATH is the container default"},
+		// #366 §2: the listen address and the database no longer count.
+		{"empty host", with("LISTEN_ADDR", ":8090"), ""},
+		{"listen unset", with("LISTEN_ADDR", ""), ""},
+		{"all interfaces", with("LISTEN_ADDR", "0.0.0.0:8090"), ""},
+		{"private address", with("LISTEN_ADDR", "192.0.2.10:8090"), ""},
+		{"db unset", with("DB_PATH", ""), ""},
+		{"db container default", with("DB_PATH", "/data/mail.db"), ""},
+		{"container shape", with("LISTEN_ADDR", ":8080", "DB_PATH", "/data/mail.db", term, "on"), ""},
+		// Admin sign-in counts only when the terminal is not loopback-only.
+		{"admin unset, terminal default", with("SWITCHBOARD_ADMIN_AUTH", ""), ""},
+		{"admin unset, terminal loopback", with("SWITCHBOARD_ADMIN_AUTH", "", term, "loopback"), ""},
+		{"admin unset, terminal on", with("SWITCHBOARD_ADMIN_AUTH", "", term, "on"), term + "=on needs admin sign-in"},
+		{"admin unset, terminal off", with("SWITCHBOARD_ADMIN_AUTH", "", term, "off"), term + "=off needs admin sign-in"},
+		{"proxy secret, terminal on", with("SWITCHBOARD_ADMIN_AUTH", "", term, "on", "SWITCHBOARD_ADMIN_PROXY_TOKEN", "proxy-secret"), ""},
 		{"old name", with("SWITCHBOARD_HOSTING", ""), ""},
 	} {
 		env := c.env
 		if c.name == "old name" {
 			env["AGENT_MAIL_HOSTING"] = "on"
-			env["LISTEN_ADDR"] = ":8080"
-			c.want = "AGENT_MAIL_HOSTING=on refused: LISTEN_ADDR :8080"
+			env["SWITCHBOARD_ADMIN_AUTH"] = ""
+			env[term] = "on"
+			c.want = "AGENT_MAIL_HOSTING=on refused: " + term + "=on needs admin sign-in"
 		}
 		on, err := hostingStart(fakeEnv(env))
 		if !on {
@@ -234,7 +241,7 @@ func TestHostingStartRefusals(t *testing.T) {
 	}
 	// Off (the default, or any value but "on") never checks anything.
 	for _, v := range []string{"", "off", "true"} {
-		if on, err := hostingStart(fakeEnv(map[string]string{"SWITCHBOARD_HOSTING": v, "LISTEN_ADDR": ":8080"})); on || err != nil {
+		if on, err := hostingStart(fakeEnv(map[string]string{"SWITCHBOARD_HOSTING": v, term: "bogus"})); on || err != nil {
 			t.Errorf("SWITCHBOARD_HOSTING=%q: on=%v err=%v", v, on, err)
 		}
 	}
@@ -252,8 +259,8 @@ func serverProcess(t *testing.T, env ...string) *exec.Cmd {
 func TestHostingRefusedStartExitsNonZero(t *testing.T) {
 	t.Parallel()
 	db := filepath.Join(t.TempDir(), "pc.db")
-	out, err := serverProcess(t, "SWITCHBOARD_HOSTING=on", "LISTEN_ADDR=:0", "SWITCHBOARD_ADMIN_AUTH=builtin", "DB_PATH="+db).CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "LISTEN_ADDR :0 is not a loopback address") {
+	out, err := serverProcess(t, "SWITCHBOARD_HOSTING=on", "LISTEN_ADDR=127.0.0.1:0", "SWITCHBOARD_HOSTING_TERMINAL=on", "DB_PATH="+db).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in") {
 		t.Fatalf("refused start: err=%v output=%s", err, out)
 	}
 	if _, statErr := os.Stat(db); statErr == nil {
@@ -261,6 +268,9 @@ func TestHostingRefusedStartExitsNonZero(t *testing.T) {
 	}
 }
 
+// TestHostingPermittedStartServes runs the plain server (Run, `serve`) with
+// hosting on: it serves, and it is a host only — no local node is registered
+// or started (#366 §2; only `up` runs a node in its process).
 func TestHostingPermittedStartServes(t *testing.T) {
 	t.Parallel()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -269,7 +279,8 @@ func TestHostingPermittedStartServes(t *testing.T) {
 	}
 	addr := l.Addr().String()
 	l.Close()
-	cmd := serverProcess(t, "SWITCHBOARD_HOSTING=on", "LISTEN_ADDR="+addr, "SWITCHBOARD_ADMIN_AUTH=builtin", "DB_PATH="+filepath.Join(t.TempDir(), "pc.db"))
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	cmd := serverProcess(t, "SWITCHBOARD_HOSTING=on", "LISTEN_ADDR="+addr, "SWITCHBOARD_ADMIN_AUTH=builtin", "SWITCHBOARD_HOSTING_TERMINAL=on", "DB_PATH="+dbPath)
 	var out strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
@@ -302,5 +313,15 @@ func TestHostingPermittedStartServes(t *testing.T) {
 	}
 	if got := send(t, "http://"+addr, "GET", "/api/admin/terminals", nil, nil); got.code != http.StatusUnauthorized {
 		t.Fatalf("terminals anonymous = %d %q, want 401", got.code, got.body)
+	}
+	// Host only: up registers its node before serving, Run never does.
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var nodes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM nodes`).Scan(&nodes); err != nil || nodes != 0 {
+		t.Fatalf("nodes = %d %v, want none", nodes, err)
 	}
 }
