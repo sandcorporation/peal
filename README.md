@@ -364,6 +364,8 @@ GitHub Actions builds versioned archives for Windows, Linux, and macOS (amd64 an
 
 A hosting instance on a PC (`switchboard up`, Windows and Linux, separate from the operations instance): [docs/hosting-pc.md](docs/hosting-pc.md).
 
+A server instance as the hosting host (terminal settings, WebSocket behind a proxy, checklist, risks, order of the move): [docs/hosting-server.md](docs/hosting-server.md).
+
 ### Hosting: browser terminal access
 
 ```sh
