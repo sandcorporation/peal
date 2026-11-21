@@ -397,18 +397,22 @@ func nullInt(i int64) any {
 
 // List serves GET /api/messages (inbox or outbox of role).
 func (s *Service) List(w http.ResponseWriter, r *http.Request, role string) {
-	s.list(w, r, role)
+	s.list(w, r, role, false)
 }
 
 // ListOf serves GET /api/messages?of=MAILBOX for a boss role: the same list
 // as List for another mailbox, read-only. The view is recorded (mailbox_views).
 // Only a global boss may call it; the caller has checked that.
 func (s *Service) ListOf(w http.ResponseWriter, r *http.Request, viewer identity.Principal, of string) {
+	if box, ok := identity.Mailbox(s.db, of); ok && box == viewer.Role {
+		s.list(w, r, viewer.Role, false) // the viewer's own mailbox: not a view
+		return
+	}
 	if err := s.recordView(viewer.Role, of, 0); err != nil {
 		http.Error(w, "view not recorded", 500)
 		return
 	}
-	s.list(w, r, of)
+	s.list(w, r, of, true)
 }
 
 // ViewForeign serves GET /api/messages/{id} for a boss role when message id
@@ -424,6 +428,7 @@ func (s *Service) ViewForeign(w http.ResponseWriter, viewer identity.Principal, 
 		return true
 	}
 	m.AnswersDirective = s.AnswersDirective(m.Recipient, id)
+	m.ViewOnly = true
 	writeJSON(w, m)
 	return true
 }
@@ -435,7 +440,8 @@ func (s *Service) recordView(viewer, mailbox string, id int64) error {
 	return err
 }
 
-func (s *Service) list(w http.ResponseWriter, r *http.Request, role string) {
+// list writes the box of role; viewOnly marks each message ViewOnly.
+func (s *Service) list(w http.ResponseWriter, r *http.Request, role string, viewOnly bool) {
 	box := r.URL.Query().Get("box")
 	if box != "outbox" {
 		box = "inbox"
@@ -472,6 +478,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request, role string) {
 	out := []wire.Message{}
 	for rows.Next() {
 		if m, err := scanMessage(rows); err == nil {
+			m.ViewOnly = viewOnly
 			out = append(out, m)
 		}
 	}

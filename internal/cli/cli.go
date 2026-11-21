@@ -548,7 +548,7 @@ func dispatch(args []string) (int, error) {
 		}
 		req, _ := http.NewRequest(method, u, nil)
 		if p.bool("--json") {
-			return doRequestWith(c, req, true, foreignNote(c.Role))
+			return doRequestWith(c, req, true, foreignNote())
 		}
 		return doRequestWith(c, req, false, readNote(c.Role))
 	case "close":
@@ -1030,16 +1030,18 @@ func ReadNote(id int64) string {
 	return fmt.Sprintf("reply %d --complete answers and completes; complete %d ends it without an answer", id, id)
 }
 
-// foreign reports whether m is another mailbox's mail (a boss view).
-func foreign(m wire.Message, role string) bool {
-	return m.ID != 0 && m.Recipient != role && m.Sender != role
+// foreign reports whether m is another mailbox's mail (a boss view). The
+// server decides (view_only); an older server sends no such field, so no
+// line is printed (#365).
+func foreign(m wire.Message) bool {
+	return m.ID != 0 && m.ViewOnly
 }
 
 // foreignNote is readNote for --json: only the other-mailbox line.
-func foreignNote(role string) func([]byte) {
+func foreignNote() func([]byte) {
 	return func(b []byte) {
 		var m wire.Message
-		if json.Unmarshal(b, &m) == nil && foreign(m, role) {
+		if json.Unmarshal(b, &m) == nil && foreign(m) {
 			fmt.Fprintln(os.Stderr, otherMailboxNote)
 		}
 	}
@@ -1051,7 +1053,7 @@ func foreignNote(role string) func([]byte) {
 func readNote(role string) func([]byte) {
 	return func(b []byte) {
 		var m wire.Message
-		if json.Unmarshal(b, &m) == nil && foreign(m, role) {
+		if json.Unmarshal(b, &m) == nil && foreign(m) {
 			fmt.Fprintln(os.Stderr, otherMailboxNote)
 			return
 		}
@@ -1158,9 +1160,17 @@ func cliList(c Config, box string, p parsedArgs) (int, error) {
 		q := req.URL.Query()
 		q.Set("of", of)
 		req.URL.RawQuery = q.Encode()
+	}
+	return doRequestWith(c, req, p.bool("--json"), listNote)
+}
+
+// listNote prints otherMailboxNote when the server marked the listed mail as
+// another mailbox's view (#365).
+func listNote(b []byte) {
+	var ms []wire.Message
+	if json.Unmarshal(b, &ms) == nil && len(ms) > 0 && ms[0].ViewOnly {
 		fmt.Fprintln(os.Stderr, otherMailboxNote)
 	}
-	return doRequest(c, req, p.bool("--json"))
 }
 
 // otherMailboxNote heads a read-only view of another mailbox.

@@ -26,6 +26,7 @@ type Message struct {
 	DeliveredAt *time.Time `json:"delivered_at,omitempty"` // when held mail moved to a session
 	Directive   bool       `json:"directive,omitempty"`    // a reply that carries new work (reply --directive); plain sends are directives anyway
 	NoReply     bool       `json:"no_reply,omitempty"`     // needs no answer (send/reply --no-reply): never an open directive
+	ViewOnly    bool       `json:"view_only,omitempty"`    // read/inbox --of response only: a boss role is viewing another mailbox, state untouched (#365)
 	NoSession   bool       `json:"no_session,omitempty"`   // set on the send response only: no session of the recipient role is attached (#300)
 	// RecipientState: set on the send and reply responses only, the
 	// receiving mailbox's state (#354).
