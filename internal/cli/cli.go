@@ -997,6 +997,9 @@ func cliReply(c Config, req *http.Request, id string, jsonMode bool) (int, error
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
+	if code, ok := refusedAmbiguous(resp.StatusCode, b, jsonMode, os.Stdout, os.Stderr); ok {
+		return code, nil
+	}
 	if resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("server returned %s: %s", resp.Status, string(b))
 	}
@@ -1211,6 +1214,9 @@ func doRequestWith(c Config, req *http.Request, jsonMode bool, after func([]byte
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
+	if code, ok := refusedAmbiguous(resp.StatusCode, b, jsonMode, os.Stdout, os.Stderr); ok {
+		return code, nil
+	}
 	if resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("server returned %s: %s", resp.Status, string(b))
 	}
@@ -1218,6 +1224,41 @@ func doRequestWith(c Config, req *http.Request, jsonMode bool, after func([]byte
 		after(b)
 	}
 	return printResponse(b, jsonMode), nil
+}
+
+// refusedAmbiguous handles a 409 ambiguous_recipient answer to a send or
+// reply (#364): "골라라" and the live slots on stderr, the body on stdout
+// with jsonMode, and ExitError. ok is false for any other answer.
+func refusedAmbiguous(status int, b []byte, jsonMode bool, stdout, stderr io.Writer) (int, bool) {
+	var a wire.AmbiguousRecipient
+	if status != http.StatusConflict || json.Unmarshal(b, &a) != nil || a.Error != wire.ErrAmbiguousRecipient {
+		return 0, false
+	}
+	if jsonMode {
+		var out bytes.Buffer
+		if json.Indent(&out, b, "", "  ") == nil {
+			b = out.Bytes()
+		}
+		fmt.Fprintln(stdout, string(b))
+	}
+	for _, line := range AmbiguousLines(a) {
+		fmt.Fprintln(stderr, line)
+	}
+	return ExitError, true
+}
+
+// AmbiguousLines are the lines a refused send prints: which name to give
+// instead, then one line per live slot (name, machine, folder, label).
+func AmbiguousLines(a wire.AmbiguousRecipient) []string {
+	out := []string{fmt.Sprintf("보내지 않음: %s 에 산 슬롯이 %d개다. 슬롯 이름으로 골라라 (1번은 %s-1)", a.Recipient, len(a.LiveSlots), a.Recipient)}
+	for _, v := range a.LiveSlots {
+		line := fmt.Sprintf("  %s  %s  %s", v.Role, v.Machine, v.Directory)
+		if v.Label != "" {
+			line += "  라벨 " + v.Label
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // printResponse prints a response body: indented JSON with jsonMode, else

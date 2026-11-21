@@ -52,6 +52,28 @@ type RecipientState struct {
 	LiveSlots []string `json:"live_slots,omitempty"`
 }
 
+// ErrAmbiguousRecipient is the error code of a send or reply a role addressed
+// to a base name while more than one slot of that base is live (#364).
+const ErrAmbiguousRecipient = "ambiguous_recipient"
+
+// AmbiguousRecipient is the 409 body of such a send or reply: the live slots
+// to choose from. "<base>-1" names slot 1 and is sent.
+type AmbiguousRecipient struct {
+	Error     string     `json:"error"` // ErrAmbiguousRecipient
+	Message   string     `json:"message"`
+	Recipient string     `json:"recipient"`
+	LiveSlots []LiveSlot `json:"live_slots"`
+}
+
+// LiveSlot is one live slot of an AmbiguousRecipient: its mailbox name
+// ("<base>" for slot 1 is given as "<base>-1"), machine, folder and label.
+type LiveSlot struct {
+	Role      string `json:"role"`
+	Machine   string `json:"machine"`
+	Directory string `json:"directory"`
+	Label     string `json:"label,omitempty"`
+}
+
 // Directive states on the wire: open while the answered rule's Open holds
 // (mail.AnsweredRule), else done.
 const (

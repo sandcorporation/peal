@@ -179,6 +179,45 @@ func (s *Service) RecipientState(m *wire.Message) *wire.RecipientState {
 	return st
 }
 
+// liveSlots lists the live slots of base when base names a base role (slot
+// 1's mailbox), live as RecipientState counts it: the lease has not ended.
+func (s *Service) liveSlots(base string) []wire.LiveSlot {
+	if b, n, ok := SlotOf(s.db, base); !ok || b != base || n != 1 {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT number,machine,directory,label FROM slots WHERE base=? AND lease_until>? ORDER BY number`, base, ms(s.now()))
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []wire.LiveSlot
+	for rows.Next() {
+		var n int
+		var v wire.LiveSlot
+		if rows.Scan(&n, &v.Machine, &v.Directory, &v.Label) == nil {
+			v.Role = identity.SlotRole(base, n)
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// refuseAmbiguous answers 409 ambiguous_recipient with the live slots.
+func refuseAmbiguous(w http.ResponseWriter, base string, live []wire.LiveSlot) {
+	names := make([]string, len(live))
+	for i, v := range live {
+		names[i] = v.Role
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(wire.AmbiguousRecipient{
+		Error:     wire.ErrAmbiguousRecipient,
+		Message:   fmt.Sprintf("%s has %d live slots; send to one of %s", base, len(live), strings.Join(names, ", ")),
+		Recipient: base,
+		LiveSlots: live,
+	})
+}
+
 // fillState sets the send response's recipient fields (#300, #354).
 func (s *Service) fillState(m *wire.Message) {
 	m.NoSession = s.noSession(m)
@@ -219,6 +258,7 @@ func (s *Service) send(w http.ResponseWriter, r *http.Request, p identity.Princi
 	m.Priority = priority
 	m.AddressedTo, m.HeldID, m.HeldAt, m.DeliveredAt = "", 0, nil, nil
 	var label labelAddr
+	var ambiguous []wire.LiveSlot
 	if isLabelAddress(m.Recipient) {
 		var e error
 		if label, e = parseLabelAddress(m.Recipient); e != nil {
@@ -247,9 +287,19 @@ func (s *Service) send(w http.ResponseWriter, r *http.Request, p identity.Princi
 		if refuseRevoked(w, s.db, identity.BaseOf(s.db, box)) {
 			return
 		}
-		if !s.ids.MaySend(p, identity.BaseOf(s.db, box)) && !s.isReplyToSender(role, m.ReplyTo, box) {
+		replyToSender := s.isReplyToSender(role, m.ReplyTo, box)
+		if !s.ids.MaySend(p, identity.BaseOf(s.db, box)) && !replyToSender {
 			http.Error(w, "outside your group", 403)
 			return
+		}
+		// A base name with more than one live slot does not say which session
+		// gets the mail (#364); "<base>-1" does, and so does answering the
+		// sender, which was slot 1.
+		// Checked after the idempotent retry below, which answers as before.
+		if !replyToSender && identity.Resolve(s.db, m.Recipient) == box {
+			if live := s.liveSlots(box); len(live) > 1 {
+				ambiguous = live
+			}
 		}
 		m.Recipient = box
 	}
@@ -295,6 +345,10 @@ func (s *Service) send(w http.ResponseWriter, r *http.Request, p identity.Princi
 			writeJSON(w, existing)
 			return
 		}
+	}
+	if ambiguous != nil {
+		refuseAmbiguous(w, m.Recipient, ambiguous)
+		return
 	}
 	now := s.now().UTC()
 	if m.ThreadID == 0 && m.ReplyTo > 0 {

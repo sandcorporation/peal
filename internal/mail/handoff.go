@@ -252,11 +252,63 @@ func HoldForHandoff(tx *sql.Tx, w Handoff, addressedTo, subject, body, task stri
 	return err
 }
 
+// InsertSessionMail stores system mail for the one session w names by its
+// machine and folder (a hosted session's, #364), once per idem: in box, that
+// session's live slot mailbox, when box is set; else held until a session of
+// w.Base registers or heartbeats there (no label or label alone takes it, as
+// for mail a role sent). Unread in box when that slot ends, it is held again
+// for the folder (HandOffUnread). It returns the mail's id and whether it was
+// stored now (false: idem was used already).
+func InsertSessionMail(tx *sql.Tx, box string, w Handoff, subject, body, idem string, now time.Time) (int64, bool, error) {
+	var id int64
+	switch err := tx.QueryRow(`SELECT id FROM messages WHERE sender=? AND idem=?`, identity.SystemSender, idem).Scan(&id); {
+	case err == nil:
+		return id, false, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return 0, false, err
+	}
+	at := now.UTC().Format(time.RFC3339Nano)
+	var res sql.Result
+	var err error
+	if box != "" {
+		res, err = tx.Exec(`INSERT INTO messages(sender,recipient,subject,body,created_at,priority,status,idem) VALUES(?,?,?,?,?,'normal','pending',?)`,
+			identity.SystemSender, box, subject, body, at, idem)
+	} else {
+		// held_notice_at is set: label stall notices are not for handed-off mail.
+		res, err = tx.Exec(`INSERT INTO messages(sender,recipient,subject,body,created_at,priority,status,addressed_to,held_at,held_notice_at,idem) VALUES(?,?,?,?,?,'normal',?,?,?,?,?)`,
+			identity.SystemSender, handoffPrefix+idem, subject, body, at, statusHeld, w.Base, at, at, idem)
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if id, err = res.LastInsertId(); err != nil {
+		return 0, false, err
+	}
+	_, err = tx.Exec(`INSERT INTO handoffs(message_id,base,machine,directory,label,strict) VALUES(?,?,?,?,?,1)`, id, w.Base, w.Machine, w.Directory, w.Label)
+	return id, true, err
+}
+
+// CurrentID is the id mail id has now: delivering held mail stores it under
+// a new id that keeps the old one as held_id (moveHeld), maybe more than once.
+func CurrentID(q identity.Queryer, id int64) int64 {
+	for i := 0; i < 16; i++ {
+		var n int64
+		if q.QueryRow(`SELECT 1 FROM messages WHERE id=?`, id).Scan(&n) == nil {
+			return id
+		}
+		if q.QueryRow(`SELECT id FROM messages WHERE held_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&n) != nil {
+			return id
+		}
+		id = n
+	}
+	return id
+}
+
 // DeliverHandoff moves the held mail a session of base at number (identity
 // machine+directory, label) may take to that slot's mailbox. It returns that
 // mailbox and how many messages moved.
 func DeliverHandoff(tx *sql.Tx, base string, number int, machine, directory, label string, now time.Time) (string, int, error) {
-	rows, err := tx.Query(`SELECT h.message_id,h.machine,h.directory,h.label,m.sender NOT IN (?,?) FROM handoffs h JOIN messages m ON m.id=h.message_id WHERE h.base=? AND (h.machine=? OR h.label=?) AND m.status=? ORDER BY h.message_id`,
+	rows, err := tx.Query(`SELECT h.message_id,h.machine,h.directory,h.label,(m.sender NOT IN (?,?) OR h.strict) FROM handoffs h JOIN messages m ON m.id=h.message_id WHERE h.base=? AND (h.machine=? OR h.label=?) AND m.status=? ORDER BY h.message_id`,
 		identity.SystemSender, identity.LegacySystemSender, base, machine, label, statusHeld)
 	if err != nil {
 		return "", 0, err

@@ -588,7 +588,18 @@ CREATE INDEX IF NOT EXISTS idx_handoffs_base ON handoffs(base);`); err != nil {
 			}
 		}
 	}
-	return nil
+	// handoffs.strict (#364): system mail for one folder's session (a
+	// scheduled run's) matches as strictly as mail a role sent. The held_id
+	// index finds mail delivered under a new id (mail.CurrentID).
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_held_id ON messages(held_id) WHERE held_id IS NOT NULL`); err != nil {
+		return err
+	}
+	has, err := HasColumn(db, "handoffs", "strict")
+	if err != nil || has {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE handoffs ADD COLUMN strict INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 // InTx runs f in one transaction on db: it commits when f returns nil and
