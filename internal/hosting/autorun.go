@@ -11,11 +11,42 @@ import (
 	"github.com/sandcorporation/switchboard/internal/wire"
 )
 
-// AutoMail puts one system mail (from switchboard/system) into role's
-// mailbox, idempotent by key, and returns its id; a second call with the
-// same key returns the first mail's id. The server passes it in; hosting
-// does not import mail.
-type AutoMail func(role, subject, body, key string) (int64, error)
+// AutoMail puts one system mail (from switchboard/system) for to,
+// idempotent by key, and returns its id; a second call with the same key
+// returns the first mail's id. The server passes it in; hosting does not
+// import mail.
+type AutoMail func(to AutoMailTo, subject, body, key string) (int64, error)
+
+// AutoMailTo is whom a scheduled run's mail is for (#364): the session of
+// the run's record, not whoever holds its base's slot 1. Slot is the live
+// slot that session holds ("<base>-N"); with no Slot the mail is held until
+// a session of Base registers at Machine in Directory (just launched).
+// Without Machine (the record's node or the slot lookup is unknown) the
+// mail goes to Base's mailbox.
+type AutoMailTo struct {
+	Base, Slot, Machine, Directory string
+}
+
+// autoMailTo is the AutoMailTo of a run of rec: rec's live slot when its
+// folder's slot is live, else rec's machine and folder.
+func (h *Hub) autoMailTo(rec wire.HostedSession) AutoMailTo {
+	to := AutoMailTo{Base: rec.Base}
+	h.mu.Lock()
+	slotOf := h.slotOf
+	h.mu.Unlock()
+	if slotOf == nil {
+		return to
+	}
+	machines, err := h.svc.nodeMachines()
+	if err != nil || machines[rec.Node] == "" {
+		return to
+	}
+	to.Machine, to.Directory = machines[rec.Node], rec.Directory
+	if sl, ok, err := slotOf(rec.Base, to.Machine, rec.Directory); err == nil && ok && sl.Live {
+		to.Slot = sl.Role
+	}
+	return to
+}
 
 // SetAutoMail installs the mail function of scheduled runs. Without it a
 // fired run records an error.
@@ -187,7 +218,7 @@ func (h *Hub) fireAuto(a wire.HostAuto, at int64, manual bool) (wire.HostAutoRun
 	if send == nil {
 		return finish(wire.AutoError, "no mail function")
 	}
-	id, err := send(rec.Base, autoSubject(a), withCheckOutput(a.Prompt, run.Output), AutoMailKey(a.ID, at, manual))
+	id, err := send(h.autoMailTo(rec), autoSubject(a), withCheckOutput(a.Prompt, run.Output), AutoMailKey(a.ID, at, manual))
 	if err != nil {
 		return finish(wire.AutoError, "mail: "+err.Error())
 	}

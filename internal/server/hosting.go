@@ -154,7 +154,7 @@ func (s *Server) hostingHub() *hosting.Hub {
 		sort.Strings(bosses)
 		s.nodeHub.SetNotify(s.hostingNotify, bosses)
 		s.nodeHub.SetAutoMail(s.hostingAutoMail)
-		s.nodeHub.SetAutoMailDone(func(id int64) (bool, error) { return mail.Completed(s.db, id) })
+		s.nodeHub.SetAutoMailDone(func(id int64) (bool, error) { return mail.Completed(s.db, mail.CurrentID(s.db, id)) })
 		s.nodeHub.SetAutoAlert(s.hostingAutoAlert)
 		s.nodeHub.SetSlotOf(s.hostingSlotOf)
 	})
@@ -251,15 +251,31 @@ func (s *Server) hostingAutoAlert(n hosting.AutoNotice) {
 	}
 }
 
-// hostingAutoMail is the hub's AutoMail: one system mail to role's mailbox,
-// idempotent by key, and the mail's id (the first one's on a repeat).
-func (s *Server) hostingAutoMail(role, subject, body, key string) (int64, error) {
+// hostingAutoMail is the hub's AutoMail: one system mail, idempotent by
+// key, and the mail's id (the first one's on a repeat). Mail for a record's
+// session (#364) goes to its live slot's mailbox or is held for it
+// (mail.InsertSessionMail); without a machine it goes to the base's mailbox.
+func (s *Server) hostingAutoMail(to hosting.AutoMailTo, subject, body, key string) (int64, error) {
 	var id int64
 	var box string
 	err := store.InTx(context.Background(), s.db, func(tx *sql.Tx) error {
 		var ok bool
-		if box, ok = identity.Mailbox(tx, role); !ok {
-			return fmt.Errorf("%q is not a registered role", role)
+		if to.Machine != "" {
+			if !identity.RoleExists(tx, to.Base) {
+				return fmt.Errorf("%q is not a registered role", to.Base)
+			}
+			box = ""
+			if to.Slot != "" {
+				if box, ok = identity.Mailbox(tx, to.Slot); !ok {
+					return fmt.Errorf("%q is not a registered role", to.Slot)
+				}
+			}
+			var err error
+			id, _, err = mail.InsertSessionMail(tx, box, mail.Handoff{Base: to.Base, Machine: to.Machine, Directory: to.Directory}, subject, body, key, s.now())
+			return err
+		}
+		if box, ok = identity.Mailbox(tx, to.Base); !ok {
+			return fmt.Errorf("%q is not a registered role", to.Base)
 		}
 		if err := mail.InsertSystemMail(tx, box, subject, body, "", "normal", key, s.now()); err != nil {
 			return err
@@ -269,7 +285,9 @@ func (s *Server) hostingAutoMail(role, subject, body, key string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	s.hub.Publish(box)
+	if box != "" {
+		s.hub.Publish(box)
+	}
 	return id, nil
 }
 

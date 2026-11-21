@@ -60,6 +60,7 @@ func TestHostAutoAlertsOnceAndResolved(t *testing.T) {
 	fake := termtest.New()
 	attachNode(t, base, token, fake)
 	eventually(t, "stopped", func() bool { return terminals(t, base, cookie)[rec.ID].Runtime.State == "stopped" })
+	sessionSlot(t, base, "/work/app")
 	got = adminCall(t, base, "POST", "/api/admin/terminals/"+rec.ID+"/autos", cookie, true, `{"cron":"0 9 * * *","prompt":"<b>p</b>","label":"<i>nightly</i>","notify":["a"],"max_run_ms":600000}`)
 	var auto wire.HostAuto
 	if err := json.Unmarshal([]byte(got.body), &auto); err != nil || got.code != http.StatusCreated {

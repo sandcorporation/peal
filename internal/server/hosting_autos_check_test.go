@@ -81,6 +81,7 @@ func TestHostAutoPrecheck(t *testing.T) {
 	stop()
 	attachNodeWith(t, base, token, fake, node.Config{AllowChecks: true, Environ: os.Environ()})
 	eventually(t, "the node is back", func() bool { return terminals(t, base, cookie)[rec.ID].Runtime.State == "stopped" })
+	sessionSlot(t, base, rec.Directory)
 
 	skip := addCheckedAuto(t, base, cookie, rec.ID, checkBody("echo nothing new && exit 1", ""))
 	makeDue(t, s, skip.ID)

@@ -31,3 +31,28 @@ func TestRecipientNotes(t *testing.T) {
 		}
 	}
 }
+
+// A 409 ambiguous_recipient answer prints the choice on stderr, the body on
+// stdout with --json, and exits 1; other answers are not taken (#364).
+func TestRefusedAmbiguous(t *testing.T) {
+	body := []byte(`{"error":"ambiguous_recipient","message":"m","recipient":"team/worker","live_slots":[{"role":"team/worker-1","machine":"m","directory":"/x"},{"role":"team/worker-2","machine":"m","directory":"/y","label":"review"}]}`)
+	var out, errOut strings.Builder
+	code, ok := refusedAmbiguous(409, body, false, &out, &errOut)
+	want := "보내지 않음: team/worker 에 산 슬롯이 2개다. 슬롯 이름으로 골라라 (1번은 team/worker-1)\n  team/worker-1  m  /x\n  team/worker-2  m  /y  라벨 review\n"
+	if !ok || code != ExitError || out.String() != "" || errOut.String() != want {
+		t.Fatalf("text: %v %d %q %q", ok, code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code, ok = refusedAmbiguous(409, body, true, &out, &errOut); !ok || code != ExitError || !strings.Contains(out.String(), `"live_slots"`) || errOut.String() != want {
+		t.Fatalf("json: %v %d %q %q", ok, code, out.String(), errOut.String())
+	}
+	for _, c := range []struct {
+		status int
+		body   string
+	}{{409, "unread mail: close it or send new mail"}, {403, string(body)}, {409, `{"error":"other"}`}} {
+		if _, ok := refusedAmbiguous(c.status, []byte(c.body), false, &out, &errOut); ok {
+			t.Fatalf("took %d %s", c.status, c.body)
+		}
+	}
+}

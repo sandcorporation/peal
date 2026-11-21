@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,28 @@ func autoMails(t *testing.T, s *Server) []string {
 		out = append(out, fmt.Sprintf("%d %s|%s", id, subject, body))
 	}
 	return out
+}
+
+// sessionSlot registers role a's session at dir on the node's machine, as
+// the hosted session's plugin does: a scheduled run's mail goes to the slot
+// its record's session holds (#364), here a's slot 1.
+func sessionSlot(t *testing.T, base, dir string) {
+	t.Helper()
+	b, _ := json.Marshal(wire.SlotRequest{Machine: hostedMachine, Directory: dir})
+	req, err := http.NewRequest("POST", base+"/api/slots/register", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-a")
+	req.Header.Set("X-Switchboard-Role", "a")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("register a at %s: %d", dir, res.StatusCode)
+	}
 }
 
 var dueTimes int64
@@ -76,6 +99,7 @@ func TestHostAutoLaunchesAStoppedSessionAndMailsItsRole(t *testing.T) {
 	fake := termtest.New()
 	stop := attachNode(t, base, token, fake)
 	eventually(t, "the node reports the stopped record", func() bool { return terminals(t, base, cookie)[rec.ID].Runtime.State == "stopped" })
+	sessionSlot(t, base, "/work/app")
 
 	got = adminCall(t, base, "POST", "/api/admin/terminals/"+rec.ID+"/autos", cookie, true, `{"cron":"0 9 * * *","prompt":"look for new reports","label":"reports"}`)
 	var auto wire.HostAuto
@@ -480,6 +504,7 @@ func TestHostAutoRunRequestFiresOnTheNextSweep(t *testing.T) {
 	}
 	attachNode(t, base, token, termtest.New())
 	eventually(t, "running", func() bool { return terminals(t, base, cookie)[rec.ID].Runtime.State == "running" })
+	sessionSlot(t, base, "/w")
 	a, err := s.hostingService().CreateAuto(rec.ID, wire.HostAutoCreate{Cron: "0 0 1 1 *", Prompt: "now please"})
 	if err != nil {
 		t.Fatal(err)
