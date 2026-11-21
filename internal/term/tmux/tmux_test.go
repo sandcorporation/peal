@@ -276,8 +276,7 @@ func TestStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	// Give the control client time to attach before anything is printed.
-	time.Sleep(300 * time.Millisecond)
+	// Stream returns attached: what is printed at once is streamed.
 	sent := []byte("a\\b\x1b[1m한\r\n\x01")
 	if len(sent) != 13 {
 		t.Fatalf("sent %d bytes", len(sent))
