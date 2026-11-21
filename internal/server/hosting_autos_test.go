@@ -321,6 +321,11 @@ func TestHostAutoMaxRunAndBusy(t *testing.T) {
 		t.Fatalf("first run %+v", first)
 	}
 
+	// The record says launched as soon as the server sent the command; the
+	// node's launch lands later. Count only after it has, or the late launch
+	// reads as one made by a busy run.
+	eventually(t, "the first run's launch", func() bool { return len(launchArgs(fake)) == 1 })
+
 	// The next time comes while that session runs: busy, no mail, no launch,
 	// for this scheduled run and any other of the same session.
 	mails, launches := len(autoMails(t, s)), len(launchArgs(fake))
