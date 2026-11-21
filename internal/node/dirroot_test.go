@@ -76,3 +76,19 @@ func TestCheckRoleProfileNeedsTheBaseRole(t *testing.T) {
 		t.Errorf("the admin's record: %v", err)
 	}
 }
+
+func TestCheckRoleArgsHoldsOnlyRoleRecords(t *testing.T) {
+	t.Parallel()
+	role := func(args ...string) Record { return Record{DirRoot: "/work", Args: args} }
+	if err := checkRoleArgs(role("--model", "claude-x", "--effort=high")); err != nil {
+		t.Errorf("allowed args: %v", err)
+	}
+	for _, a := range [][]string{{"--add-dir", "/"}, {"--settings=x"}, {"--model", "../x"}, {"--model"}} {
+		if err := checkRoleArgs(role(a...)); err == nil {
+			t.Errorf("%v accepted", a)
+		}
+	}
+	if err := checkRoleArgs(Record{Args: []string{"--add-dir", "/"}}); err != nil {
+		t.Errorf("an admin record is not held to the allow-list: %v", err)
+	}
+}

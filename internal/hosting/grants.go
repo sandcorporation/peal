@@ -179,6 +179,9 @@ func (s *Service) admit(role string, c *wire.HostedSessionCreate) (string, error
 	if c.Class == "" {
 		c.Class = wire.ClassExecute
 	}
+	if err := wire.CheckRoleArgs(c.Args); err != nil {
+		return "", forbiddenf("%v", err)
+	}
 	if len(c.Env) > 0 {
 		return "", forbiddenf("env: a role's session takes no env (it could point the session at another profile); the admin sets env")
 	}
