@@ -332,6 +332,9 @@ func (l *Link) receive(ctx context.Context, f wire.NodeFrame, sctx context.Conte
 		}
 	case wire.NodeAssign:
 		if l.Profiles != nil {
+			if l.Profiles.Logf == nil {
+				l.Profiles.Logf = l.Logf
+			}
 			l.Profiles.apply(f.Sessions)
 		}
 		l.Node.Assign(f.Sessions)
