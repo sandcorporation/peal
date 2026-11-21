@@ -87,4 +87,13 @@ type Closed struct {
 	// Completed is the answer closed by its ID (close <answer ID>, #327):
 	// the caller's copy of it is complete too.
 	Completed int64 `json:"completed,omitempty"`
+	// Withdrawn: the recipient had not read the directive, so closing took
+	// it back from the recipient's mailbox (#354).
+	Withdrawn bool `json:"withdrawn,omitempty"`
+}
+
+// Withdrawn is the answer of POST /api/messages/{id}/withdraw (#354).
+type Withdrawn struct {
+	ID        int64 `json:"id"`
+	Withdrawn bool  `json:"withdrawn"`
 }

@@ -423,6 +423,10 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 				s.mail().Close(w, r, role, id)
 				return
 			}
+			if parts[2] == "withdraw" {
+				s.mail().Withdraw(w, r, role, id)
+				return
+			}
 			if parts[2] == "ack" || parts[2] == "complete" || parts[2] == "read" {
 				s.mail().Status(w, r, role, id, parts[2])
 				return

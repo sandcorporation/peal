@@ -162,6 +162,7 @@ var commands = []command{
 	{name: "ack", args: "ID", nargs: 1, summary: "Acknowledge a message", options: []option{optJSON, optProfile}},
 	{name: "complete", args: "ID", nargs: 1, summary: "Mark a message complete", options: []option{optJSON, optProfile}},
 	{name: "close", args: "ID", nargs: 1, summary: "Close a directive you sent: it needs no answer (no longer open, never reminded); given an answer's ID, close the directive it answers and complete the answer", options: []option{optJSON, optProfile}},
+	{name: "withdraw", args: "ID", nargs: 1, summary: "Take back mail you sent that its recipient has not read (409 once read: close it or send new mail)", options: []option{optJSON, optProfile}},
 	{name: "slots", summary: "List the leased numbered slots under the active role's base",
 		options: []option{optJSON, optProfile}},
 	{name: "slot", args: "ACTION", nargs: 1, synopsis: "(ACTION: register | heartbeat | takeover | release)",
@@ -563,11 +564,24 @@ func dispatch(args []string) (int, error) {
 		if e = json.Unmarshal(b, &out); e != nil {
 			return 0, fmt.Errorf("unexpected response from server: %v", e)
 		}
-		if out.Completed != 0 {
+		switch {
+		case out.Completed != 0:
 			fmt.Printf("#%d closed; #%d complete\n", out.ID, out.Completed)
-		} else {
-			fmt.Printf("#%d closed\n", out.ID)
+		case out.Withdrawn:
+			fmt.Printf("#%d closed; withdrawn (the recipient had not read it)\n", out.ID)
+		default:
+			fmt.Printf("#%d closed; the recipient already read it, so it stays in its mailbox marked as needing no answer\n", out.ID)
 		}
+		return ExitOK, nil
+	case "withdraw":
+		if p.bool("--json") {
+			req, _ := http.NewRequest("POST", endpoint(c, "/api/messages/"+p.pos[0]+"/withdraw"), nil)
+			return doRequest(c, req, true)
+		}
+		if _, e := slotCall(c, "POST", "/api/messages/"+p.pos[0]+"/withdraw", nil); e != nil {
+			return 0, e
+		}
+		fmt.Printf("#%s withdrawn\n", p.pos[0])
 		return ExitOK, nil
 	case "reply":
 		body, e := inputBody(p)

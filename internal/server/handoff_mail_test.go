@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sandcorporation/switchboard/internal/identity"
+	"github.com/sandcorporation/switchboard/internal/insight"
 	"github.com/sandcorporation/switchboard/internal/wire"
 )
 
@@ -190,5 +191,96 @@ func TestNoSessionNoticePerMailbox(t *testing.T) {
 	}
 	if got := noSessionNotices(t, s); len(got) != 1 || !strings.Contains(got[0], "team/worker-3 붙은 세션 없음") {
 		t.Fatalf("notices %q", got)
+	}
+}
+
+// withdrawMail posts /api/messages/{id}/withdraw as role.
+func withdrawMail(s *Server, role string, id int64) (int, string) {
+	w := callAs(s, "POST", "/api/messages/"+itoa(id)+"/withdraw", tokenFor(role), role, nil)
+	return w.Code, strings.TrimSpace(w.Body.String())
+}
+
+// Withdrawn mail and an unread directive the sender closed leave the
+// recipient's mailbox: the next session of slot 1 does not get them, the
+// pending alert leaves them out, and the sender's outbox shows withdrawn.
+// Read mail cannot be withdrawn (409) and is only closed (#354).
+func TestWithdrawAndCloseUnread(t *testing.T) {
+	t.Parallel()
+	s, clock := slotsWithRoles(t)
+	s.alerts = &insight.Thresholds{Pending: time.Hour}
+	s.bossRoles = map[string]bool{"hq/boss": true, "team/lead": true}
+	if _, err := seedRoles(s.db, `INSERT INTO roles(role,token,created_at) VALUES('team/lead','secret-team/lead','now')`); err != nil {
+		t.Fatal(err)
+	}
+	slotDo(t, s, "register", ident("m", "/x")) // A, slot 1
+	gone := bossSend(t, s, "team/worker", "withdraw me")
+	closed := bossSend(t, s, "team/worker", "close me")
+	read := bossSend(t, s, "team/worker", "already read")
+	keep := bossSend(t, s, "team/worker", "keep")
+	readAs(t, s, "team/worker", read.ID)
+
+	if code, body := withdrawMail(s, "team/worker", gone.ID); code != 403 {
+		t.Fatalf("withdraw by the recipient: %d %s", code, body)
+	}
+	if code, body := withdrawMail(s, "hq/boss", gone.ID); code != 200 || body != `{"id":`+itoa(gone.ID)+`,"withdrawn":true}` {
+		t.Fatalf("withdraw: %d %s", code, body)
+	}
+	if code, body := withdrawMail(s, "hq/boss", read.ID); code != 409 {
+		t.Fatalf("withdraw read mail: %d %s, want 409", code, body)
+	}
+	if code, body := closeAs(s, "hq/boss", closed.ID); code != 200 || body != withdrawnJSON(closed.ID) {
+		t.Fatalf("close unread: %d %s", code, body)
+	}
+	if code, body := closeAs(s, "hq/boss", read.ID); code != 200 || body != closedJSON(read.ID) {
+		t.Fatalf("close read: %d %s", code, body)
+	}
+	if got := strings.Join(inboxSubjects(t, s, "team/worker"), ","); got != "keep,already read" {
+		t.Fatalf("A's inbox: %s", got)
+	}
+
+	// A ends; B takes slot 1: "keep" is held for A, the withdrawn and closed
+	// mail is gone; only the read mail stays in the mailbox, as before.
+	clock.add(2 * time.Minute)
+	slotDo(t, s, "register", ident("m", "/y"))
+	if got := strings.Join(inboxSubjects(t, s, "team/worker"), ","); got != "already read" {
+		t.Fatalf("B's inbox: %v", got)
+	}
+	if got := heldNotices(t, s, "hq/boss", "handoff-held"); len(got) != 1 || !strings.Contains(got[0], "#"+itoa(keep.ID)+" keep") {
+		t.Fatalf("held notices: %q", got)
+	}
+
+	// Pending alert: a fresh unread mail and the withdrawn one; only the
+	// fresh one is named.
+	fresh := bossSend(t, s, "team/worker", "fresh")
+	gone2 := bossSend(t, s, "team/worker", "gone too")
+	if code, _ := withdrawMail(s, "hq/boss", gone2.ID); code != 200 {
+		t.Fatalf("withdraw gone too: %d", code)
+	}
+	clock.add(2 * time.Hour)
+	slotDo(t, s, "heartbeat", ident("m", "/y"))
+	sweepOnce(t, s)
+	var alert *wire.Message
+	for _, m := range systemMail(t, s, "secret-team/lead", "team/lead") {
+		if strings.HasPrefix(m.Subject, "[지표] pending team/worker") {
+			m := m
+			alert = &m
+		}
+	}
+	if alert == nil || !strings.Contains(alert.Subject, "1통") || !strings.Contains(alert.Body, "#"+itoa(fresh.ID)+" hq/boss — fresh") ||
+		strings.Contains(alert.Body, "gone too") || strings.Contains(alert.Body, "withdraw me") || strings.Contains(alert.Body, "close me") {
+		t.Fatalf("pending alert: %+v", alert)
+	}
+
+	var out []wire.Message
+	w := callAs(s, "GET", "/api/messages?box=outbox", tokenFor("hq/boss"), "hq/boss", nil)
+	if json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Fatalf("outbox: %s", w.Body)
+	}
+	states := map[string]string{}
+	for _, m := range out {
+		states[m.Subject] = m.Status
+	}
+	if states["withdraw me"] != "withdrawn" || states["close me"] != "withdrawn" || states["already read"] != "read" {
+		t.Fatalf("outbox states: %v", states)
 	}
 }

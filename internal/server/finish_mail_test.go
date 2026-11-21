@@ -158,8 +158,9 @@ func TestCloseByAnswerClosesDirectiveAndCompletesAnswer(t *testing.T) {
 	if n := countRows(t, h.s, `SELECT COUNT(*) FROM role_states`); n != 1 {
 		t.Fatalf("marks %d, want 1", n)
 	}
-	// A directive ID still closes as before.
-	if out := h.mustRun(nil, "close", "1"); out != "#1 closed" {
+	// A directive ID still closes as before; it was answered, so it is not
+	// withdrawn (#354).
+	if out := h.mustRun(nil, "close", "1"); out != "#1 closed; the recipient already read it, so it stays in its mailbox marked as needing no answer" {
 		t.Fatalf("close 1: %q", out)
 	}
 	// #3 answers #2, which is not a directive: refused as before, 403 for
