@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sandcorporation/switchboard/internal/config"
 	"github.com/sandcorporation/switchboard/internal/ownerfile"
@@ -25,6 +27,24 @@ import (
 type Profiles struct {
 	Dir      string
 	Endpoint string
+	// Logf, when set, gets one line for a profile that could not be removed.
+	Logf func(format string, args ...any)
+
+	mu      sync.Mutex
+	pending map[string]bool // records whose profile removal failed and is retried
+	running bool            // a retry goroutine is alive
+	remove  func(string) error
+	retry   time.Duration
+}
+
+// removeRetryEvery is how often a failed profile removal is tried again.
+const removeRetryEvery = time.Second
+
+func (p *Profiles) removeFile(path string) error {
+	if p.remove != nil {
+		return p.remove(path)
+	}
+	return os.Remove(path)
 }
 
 // hostedProfile is the profile file: the CLI reads endpoint, role and token
@@ -114,6 +134,11 @@ func (p *Profiles) Write(record string, c wire.NodeCredential) error {
 	if err = os.MkdirAll(p.Dir, 0o700); err != nil {
 		return err
 	}
+	// A rewrite cancels a pending removal of the older profile, and the
+	// retry cannot delete the new one while it is written.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.pending, record)
 	dst := p.path(record)
 	tmp := dst + ".new"
 	os.Remove(tmp)
@@ -143,7 +168,9 @@ func (p *Profiles) Write(record string, c wire.NodeCredential) error {
 }
 
 // apply points each record the node holds a credential for at its profile
-// and removes the profiles of records no longer assigned.
+// and removes the profiles of records no longer assigned. A removal that
+// fails (on Windows another process may hold the file open) is logged and
+// retried in the background, so the assignment is not held up.
 func (p *Profiles) apply(recs []Record) {
 	keep := map[string]bool{}
 	for i := range recs {
@@ -152,9 +179,60 @@ func (p *Profiles) apply(recs []Record) {
 			recs[i].Profile = wire.HostedProfileName(recs[i].ID)
 		}
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for r := range keep {
+		delete(p.pending, r)
+	}
 	for _, r := range p.records() {
 		if !keep[r] {
-			os.Remove(p.path(r))
+			p.tryRemoveLocked(r, true)
 		}
 	}
+	p.startRetryLocked()
+}
+
+// tryRemoveLocked removes record's profile; a failure other than "already
+// gone" marks it pending. Holds p.mu.
+func (p *Profiles) tryRemoveLocked(record string, log bool) {
+	err := p.removeFile(p.path(record))
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		delete(p.pending, record)
+		return
+	}
+	if log && p.Logf != nil {
+		p.Logf("node: remove profile of %s: %v (retrying)", record, err)
+	}
+	if p.pending == nil {
+		p.pending = map[string]bool{}
+	}
+	p.pending[record] = true
+}
+
+// startRetryLocked starts the retry goroutine when removals are pending and
+// none is running. It ends once nothing is pending. Holds p.mu.
+func (p *Profiles) startRetryLocked() {
+	if len(p.pending) == 0 || p.running {
+		return
+	}
+	p.running = true
+	every := p.retry
+	if every <= 0 {
+		every = removeRetryEvery
+	}
+	go func() {
+		for {
+			time.Sleep(every)
+			p.mu.Lock()
+			for r := range p.pending {
+				p.tryRemoveLocked(r, false)
+			}
+			if len(p.pending) == 0 {
+				p.running = false
+				p.mu.Unlock()
+				return
+			}
+			p.mu.Unlock()
+		}
+	}()
 }
