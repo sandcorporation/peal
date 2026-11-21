@@ -857,6 +857,150 @@ rm -r "$SBNODE"
 
 Check: the task or unit is gone and the node directory no longer exists; with it go `node.token` and every `hosted-*.json`.
 
+## Scheduled runs
+
+A scheduled run launches a hosted session at cron times and mails a prompt to the session's base role. It belongs to one session record on the host; the session's node does the launching and, with a precheck, decides whether to run. Values below, used with the session from W7 / L7 (`team/worker` in `work\app` / `~/work/app`):
+
+| Value | Setting |
+| --- | --- |
+| `--cron` | five fields, read in the host's time zone: `30 2 * * 1-5` is 02:30 on weekdays |
+| `--prompt` | the mail the session's base role gets at each run |
+| `--label` | the mail subject (default `scheduled run <id>`) |
+| `--check` | precheck: a shell command run on the node in the session's folder before each run (`sh -c`; `cmd /c` on Windows) |
+| `--check-timeout` | limit of the precheck, `1s` to `10m` (default `60s`) |
+| `--max-run` | stop a session the run launched after this long, `1m` to `168h` (default `2h`); it also stops when the run's mail is completed |
+| `--resume` | continue the session's last conversation (default: a new one each run) |
+| `--notify` | roles mailed about runs that need attention, comma separated |
+
+Precheck exit codes (its standard output, the last 4 KiB, follows the prompt in the mail):
+
+| Precheck | Run result | What happens |
+| --- | --- | --- |
+| exit `0` | `fired` | the session is launched (when stopped) and gets the mail |
+| exit `1` | `skipped` | nothing is launched or mailed |
+| any other exit, or no exit code | `error` | nothing is launched; alert |
+| no exit within `--check-timeout` | `timeout` | the command is killed with everything it started; alert |
+| node started without `--allow-checks` | `error` | `this node does not run prechecks (start it with --allow-checks or SWITCHBOARD_HOSTING_ALLOW_CHECKS=on)`; alert |
+
+Other results: `overrun` (the launched session was still running at `--max-run`; it is stopped; alert), `busy` (an earlier run's session still holds the session, or its precheck still runs; nothing is launched), `waiting` (`SWITCHBOARD_HOSTING_MAX` sessions already run), `node-offline` (the session's node is not attached). `error`, `timeout` and `overrun` alert once (Discord, and a system mail to each `--notify` role); the same result again is not alerted; the next `fired` or `skipped` sends `resolved`. `busy`, `waiting` and `node-offline` do not alert. Each scheduled run keeps its newest 500 runs.
+
+The session must be stopped for the run to launch it (`host stop`); a session that already runs only gets the mail and is not stopped afterwards. The host picks up changes and due times on its sweep (every 30 s, `SWITCHBOARD_SWEEP_INTERVAL`); a time missed while the host was down fires once, not once per missed time.
+
+### S1. Allow prechecks on the node
+
+A node runs a precheck only when started with `--allow-checks`; a scheduled run without `--check` needs nothing. On the host machine, for the node `local` that `up` runs: on Windows add `set SWITCHBOARD_HOSTING_ALLOW_CHECKS=on` after the `SWITCHBOARD_HOSTING_AGENT` line of the W6 block and run W6 again; on Linux add `Environment=SWITCHBOARD_HOSTING_ALLOW_CHECKS=on` after the `SWITCHBOARD_HOSTING_AGENT` line of the L6 block and run L6 again. For a node on another machine add `--allow-checks` to its `node --host …` line (NW3: in `node.cmd`; NL3: after `ExecStart=$SBNODE/bin/switchboard node --host $SBHOST`) and run that step again. A precheck gets the session's environment without its role profile, so it cannot read the role's token.
+
+Check: `sbpc host auto add` with a `--check` (below) and `host auto run` ends `skipped` or `fired`, not `error` with `this node does not run prechecks`.
+
+### SW2. Windows: schedule a run
+
+```powershell
+New-Item -ItemType Directory -Force $work | Out-Null
+Set-Content "$work\queue.txt" -Value '' -NoNewline
+sbpc host stop $id
+$auto = sbpc host auto add $id --cron '30 2 * * 1-5' --label nightly --prompt 'Work through queue.txt and report to team/boss.' --check 'findstr /r /c:. queue.txt' --notify team/boss --max-run 30m
+$auto
+sbpc host auto list
+sbpc host auto run $auto
+sbwait 90 { (sbpc host auto show $auto) -match 'precheck: exit 1' }
+Set-Content "$work\queue.txt" -Value '- rotate logs'
+sbpc host auto run $auto
+sbwait 90 { (sbpc host auto show $auto) -match ' fired ' }
+sbpc host auto show $auto
+sbpc --profile pc-worker inbox
+$mail = (sbpc host auto show $auto --json | ConvertFrom-Json).last_run.mail_id
+sbpc --profile pc-worker complete $mail
+sbwait 90 { (sbpc host list) -match 'stopped' }
+sbpc host auto show $auto
+```
+
+Check: `host auto add` prints the scheduled run's number; `host auto list` shows it `active` with the next time and `LAST` `-`. The first run ends `skipped` (`precheck: exit 1`: the queue is empty). The second ends `fired` with a `MAIL` number and the agent's conversation ID under `LAUNCHED`; `inbox` shows the mail `nightly` from `switchboard/system` with the prompt and, below it, `- rotate logs`. After `complete` the session is stopped within one sweep and the run's `DETAIL` reads `mail completed, session stopped`. `host auto run` works for any state and time; its lines read `(run now)`.
+
+If it fails: `no hosted session …` → `$id` is not set; take it from `sbpc host list`. `notify: "team/boss" is not a registered role` → W5 did not register it. The run is `error` with `this node does not run prechecks` → S1. `error` with `precheck: exit 2` → `findstr` could not read `queue.txt`; the check runs in the session's folder, so run the first line again. `busy` → the session is still running from an earlier run; `sbpc host stop $id`. `waiting` → `SWITCHBOARD_HOSTING_MAX` sessions already run.
+
+### SL2. Linux: schedule a run
+
+```sh
+mkdir -p "$HOME/work/app"
+: > "$HOME/work/app/queue.txt"
+sbpc host stop "$SBID"
+SBAUTO="$(sbpc host auto add "$SBID" --cron '30 2 * * 1-5' --label nightly --prompt 'Work through queue.txt and report to team/boss.' --check 'grep . queue.txt' --notify team/boss --max-run 30m)"
+echo "$SBAUTO"
+sbpc host auto list
+sbpc host auto run "$SBAUTO"
+sbwait 90 eval 'sbpc host auto show "$SBAUTO" | grep -q "precheck: exit 1"'
+echo '- rotate logs' > "$HOME/work/app/queue.txt"
+sbpc host auto run "$SBAUTO"
+sbwait 90 eval 'sbpc host auto show "$SBAUTO" | grep -q " fired "'
+sbpc host auto show "$SBAUTO"
+sbpc --profile pc-worker inbox
+SBMAIL="$(sbpc host auto show "$SBAUTO" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["last_run"]["mail_id"])')"
+sbpc --profile pc-worker complete "$SBMAIL"
+sbwait 90 eval 'sbpc host list | grep -q stopped'
+sbpc host auto show "$SBAUTO"
+```
+
+Check and failures: as in SW2 (`grep . queue.txt` exits `1` on an empty file and prints the non-empty lines otherwise).
+
+### S3. Read the history, pause, remove
+
+```sh
+sbpc host auto list
+sbpc host auto show <auto-id> --runs 50
+sbpc host auto pause <auto-id>
+sbpc host auto resume <auto-id>
+sbpc host auto rm <auto-id>
+```
+
+`list` has one line per scheduled run: `STATE` `active` or `paused`, `NEXT`, and `LAST` (the newest run's result and time). `show` prints the settings, the prompt and the newest `--runs` runs (default 20, at most 500) with `AT`, `RESULT`, `MAIL`, `LAUNCHED` and `DETAIL` (a precheck's exit code, the reason of an `error`); `--json` has each run's precheck exit code, duration and output. The dashboard shows the same under the session in the 터미널 tab, sub-tab 예약; a stretch of `skipped` runs is folded into one line. `pause` stops the times from firing (times passed meanwhile are not made up); `resume` takes the next time after now; `rm` deletes the scheduled run with its history; removing the session record removes its scheduled runs. `host auto` reads and writes the host's database directly, so run it in the same window as the other `sbpc host` commands.
+
+### S4. Move an outside automation to a scheduled run
+
+An automation outside the host (a crontab line or a Task Scheduler task that runs a script, which checks whether there is work, opens a new terminal session in the project folder and types the prompt) maps one to one:
+
+| Outside automation | Scheduled run |
+| --- | --- |
+| crontab line / Task Scheduler trigger | `--cron` (host's time zone) |
+| the script's "is there work?" test and its exit code | `--check` (exit `0` run, `1` skip, other: error) |
+| text the script prints into the prompt | the precheck's output after the prompt |
+| a new terminal session in the folder | the session record, launched with a new conversation (or `--resume`) |
+| typing the prompt | `--prompt`, mailed to the session's base role |
+| closing the terminal when done, or after a timeout | completing the mail, or `--max-run` |
+| mailing yourself when the script fails | `--notify team/boss`: once, then `resolved` |
+
+Before, with the base role `team/relay`:
+
+```
+*/30 * * * * cd ~/work/relay && ./has-work.sh && tmux new-session -d -s relay-run 'claude "Process the relay queue."'
+```
+
+After. Register `team/relay` and its profile `pc-relay` as in L5 / W5, then:
+
+Linux:
+
+```sh
+mkdir -p "$HOME/work/relay"
+SBRELAY="$(sbpc host add --node local --base team/relay --profile pc-relay --dir "$HOME/work/relay" --label relay --parent team/boss --class execute -- --model opus)"
+sbpc host stop "$SBRELAY"
+SBAUTO="$(sbpc host auto add "$SBRELAY" --cron '*/30 * * * *' --label relay-queue --prompt 'Process the relay queue.' --check './has-work.sh' --check-timeout 30s --notify team/boss --max-run 1h)"
+sbpc host auto list
+```
+
+Windows:
+
+```powershell
+$relay = Join-Path $env:USERPROFILE 'work\relay'
+New-Item -ItemType Directory -Force $relay | Out-Null
+$rid = sbpc host add --node local --base team/relay --profile pc-relay --dir $relay --label relay --parent team/boss --class execute '--' --model opus
+sbpc host stop $rid
+$auto = sbpc host auto add $rid --cron '*/30 * * * *' --label relay-queue --prompt 'Process the relay queue.' --check 'has-work.cmd' --check-timeout 30s --notify team/boss --max-run 1h
+sbpc host auto list
+```
+
+Check: `host auto list` shows `relay-queue` `active` with the next time. Then remove the outside entry (Linux: delete the crontab line; Windows: `Unregister-ScheduledTask -TaskName 'relay-queue' -Confirm:$false`) so that nothing starts a second session. The script keeps its exit codes (`0` work, `1` none). Run the script once by hand in the session's folder first (`./has-work.sh; echo $?`), and `host auto run` once before waiting for the first time.
+
+If it fails: a run is `busy` while the old automation's session still runs → stop it before the first run. `error` with `precheck: exit 127` (or `'has-work.cmd' is not recognized`) → the script is not in the session's folder or not executable; the precheck runs there with a shell, not the script's own folder.
+
 ## OIDC sign-in
 
 Instead of names, passwords and TOTP, the instance can sign admins in with an OpenID Connect provider of the installer's choice. Do this after W8 / L8: the checks there sign in as `pcadmin`, which the oidc mode no longer accepts (`sblogin` gets `401`).
