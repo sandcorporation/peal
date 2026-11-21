@@ -85,3 +85,13 @@ func profileDirs() []string {
 	}
 	return []string{filepath.Join(d, config.ConfigDirName), filepath.Join(d, config.LegacyConfigDir)}
 }
+
+// checkRoleArgs holds a stored role record (#377) to the same flag
+// allow-list the host applied when it was added. Admin records have no
+// grant root and keep the deny-list the host applies to them.
+func checkRoleArgs(r Record) error {
+	if r.DirRoot == "" {
+		return nil
+	}
+	return wire.CheckRoleArgs(r.Args)
+}

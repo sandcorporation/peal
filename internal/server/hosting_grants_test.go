@@ -78,6 +78,14 @@ func TestRoleHostsSessionsWithinItsGrant(t *testing.T) {
 		{rec("/work/app", `,"class":"lead"`), "class: lead is for the admin"},
 		{rec("/work/app", `,"class":"coordinator"`), "class: coordinator is for the admin"},
 		{rec("/work/app", `,"env":{"XDG_CONFIG_HOME":"/tmp"}`), "env: a role's session takes no env"},
+		{rec("/work/app", `,"args":["--add-dir","/"]`), "--add-dir is not allowed for a role"},
+		{rec("/work/app", `,"args":["--settings","x"]`), "--settings is not allowed"},
+		{rec("/work/app", `,"args":["--mcp-config=x"]`), "--mcp-config=x is not allowed"},
+		{rec("/work/app", `,"args":["--permission-mode","x"]`), "--permission-mode is not allowed"},
+		{rec("/work/app", `,"args":["--append-system-prompt","x"]`), "--append-system-prompt is not allowed"},
+		{rec("/work/app", `,"args":["--model","../x"]`), `--model value "../x" is not allowed`},
+		{rec("/work/app", `,"args":["--agent","a b"]`), "--agent value"},
+		{rec("/work/app", `,"args":["--model"]`), "--model needs a value"},
 	} {
 		if got := asA("POST", "terminals", c.body); got.code != 403 || !strings.Contains(got.body, c.want) {
 			t.Errorf("add %s = %d %s, want 403 %q", c.body, got.code, got.body, c.want)
@@ -87,15 +95,15 @@ func TestRoleHostsSessionsWithinItsGrant(t *testing.T) {
 		t.Errorf("relative directory = %d %s", got.code, got.body)
 	}
 
-	got = asA("POST", "terminals", rec("/work/./app/x/..", `,"class":"review"`))
+	got = asA("POST", "terminals", rec("/work/./app/x/..", `,"class":"review","args":["--model","claude-x","--agent=reviewer","--name","Pc 1","--effort","high"]`))
 	var h wire.HostedSession
 	if got.code != 201 || json.Unmarshal([]byte(got.body), &h) != nil {
 		t.Fatalf("add within the grant = %d %s", got.code, got.body)
 	}
-	if h.Parent != "a" || h.Directory != "/work/app" || h.DirRoot != "/work" || h.Class != "review" {
+	if h.Parent != "a" || h.Directory != "/work/app" || h.DirRoot != "/work" || h.Class != "review" || len(h.Args) != 7 {
 		t.Errorf("added %+v", h)
 	}
-	admins := createRecord(t, base, cookie, `{"node":"pc","base":"b","profile":"p","directory":"/work/other","parent":"a"}`)
+	admins := createRecord(t, base, cookie, `{"node":"pc","base":"b","profile":"p","directory":"/work/other","parent":"a","args":["--add-dir","/"]}`)
 	other := createRecord(t, base, cookie, `{"node":"pc","base":"b","profile":"p","directory":"/work/b","parent":"b"}`)
 
 	var list []wire.HostedSession

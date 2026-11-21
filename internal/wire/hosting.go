@@ -223,6 +223,7 @@ const (
 	HostedEventStop    = "stop"    // stopped because the record was set to stopped
 	HostedEventCrash   = "crash"   // ended with a non-zero exit code
 	HostedEventExit    = "exit"    // ended with exit code 0
+	HostedEventRefused = "refused" // the node would not launch the record (a stored role record outside its grant); the first refusal only
 	HostedEventAdopt   = "adopt"   // a node process found the session already running (its keeper or tmux kept it)
 )
 
