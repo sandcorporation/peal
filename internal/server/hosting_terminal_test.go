@@ -372,6 +372,7 @@ func TestHostingStartChecksTerminalSetting(t *testing.T) {
 		{"bad value", with("SWITCHBOARD_HOSTING_TERMINAL", "yes"), `SWITCHBOARD_HOSTING_TERMINAL must be loopback, on or off (got "yes")`},
 		{"bad allow", with("SWITCHBOARD_HOSTING_TERMINAL_ALLOW", "10.0.0.1/99"), `SWITCHBOARD_HOSTING_TERMINAL_ALLOW: "10.0.0.1/99" is not a CIDR range`},
 		{"allow", with("SWITCHBOARD_HOSTING_TERMINAL_ALLOW", "198.51.100.0/24, 2001:db8::/32"), ""},
+		{"off without sign-in", with("SWITCHBOARD_HOSTING_TERMINAL", "off", "SWITCHBOARD_ADMIN_AUTH", ""), ""},
 		{"on without sign-in", with("SWITCHBOARD_HOSTING_TERMINAL", "on", "SWITCHBOARD_ADMIN_AUTH", ""), "SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in"},
 	} {
 		_, err := hostingStart(c.env)
@@ -392,7 +393,7 @@ func TestHostingStartChecksTerminalSetting(t *testing.T) {
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "on"}, false},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "on", "SWITCHBOARD_ADMIN_PROXY_TOKEN": "proxy-secret"}, true},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "on", "SWITCHBOARD_ADMIN_AUTH": "oidc"}, true},
-		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "off"}, false},
+		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "off"}, true},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "off", "SWITCHBOARD_ADMIN_AUTH": "builtin"}, true},
 		{map[string]string{"SWITCHBOARD_HOSTING_TERMINAL": "loopback"}, true},
 		{map[string]string{}, true},

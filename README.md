@@ -373,7 +373,7 @@ SWITCHBOARD_HOSTING_TERMINAL_ALLOW=198.51.100.0/24,2001:db8::/32   # optional
 
 - `loopback`: the terminal's ticket and socket answer requests from a loopback peer without proxy forwarding headers; elsewhere 404.
 - `on`: any listener and address, for a signed-in admin. The server refuses to start unless admin sign-in is set (`SWITCHBOARD_ADMIN_AUTH` builtin or oidc, or `SWITCHBOARD_ADMIN_PROXY_TOKEN`).
-- `off`: 404 everywhere. Like `on`, it needs admin sign-in to be set, or the server does not start; only `loopback` starts without it.
+- `off`: 404 everywhere. It needs no admin sign-in; only `on` needs it set, or the server does not start.
 - `SWITCHBOARD_HOSTING_TERMINAL_ALLOW`: when set, a client address outside the ranges gets 403. With `SWITCHBOARD_TRUST_FORWARDED=1` the client address is the one the nearest proxy forwarded, as for admin login.
 
 The socket also checks `Origin` and takes a single-use ticket. Opening and closing a terminal socket is logged with the admin, time, view/input and client address (the dashboard's 기록 tab); typed text is not stored. Where the setting refuses, the dashboard's terminal screen shows why.
@@ -387,7 +387,7 @@ SWITCHBOARD_HOSTING_REMOTE_LISTEN=100.64.0.10:8091            # IP:port; unset: 
 SWITCHBOARD_HOSTING_REMOTE_ALLOW=100.64.0.0/10                # CIDR list; unset: no address limit leak-guard:allow
 ```
 
-The host refuses to start when the address binds every interface (`0.0.0.0`, `::`), is a host name or is loopback, or, with `SWITCHBOARD_HOSTING_REMOTE_ALLOW` set, is outside it. The remote listener serves the node channel (`/api/node/*`, node token) and the role API (role token), answers requests with `X-Forwarded-*` or `Forwarded` headers `403` (and, with `SWITCHBOARD_HOSTING_REMOTE_ALLOW` set, peers outside it), and answers the admin API, the dashboard, setup, sign-in and the browser terminal `404`. Where the browser terminal answers is `SWITCHBOARD_HOSTING_TERMINAL`'s (default `loopback`).
+A wildcard address (`0.0.0.0:<port>`, `[::]:<port>`, `:<port>`) is accepted, for a container that cannot know its outside address; the start log says "every interface" and the peer range (or any peer). The host refuses to start when the address is a host name or is loopback, or, with `SWITCHBOARD_HOSTING_REMOTE_ALLOW` set, is outside it. The remote listener serves the node channel (`/api/node/*`, node token) and the role API (role token), answers requests with `X-Forwarded-*` or `Forwarded` headers `403` (and, with `SWITCHBOARD_HOSTING_REMOTE_ALLOW` set, peers outside it), and answers the admin API, the dashboard, setup, sign-in and the browser terminal `404`. Where the browser terminal answers is `SWITCHBOARD_HOSTING_TERMINAL`'s (default `loopback`).
 
 To attach a node on another machine:
 

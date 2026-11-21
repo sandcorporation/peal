@@ -217,7 +217,7 @@ func TestHostingStartRefusals(t *testing.T) {
 		{"admin unset, terminal default", with("SWITCHBOARD_ADMIN_AUTH", ""), ""},
 		{"admin unset, terminal loopback", with("SWITCHBOARD_ADMIN_AUTH", "", term, "loopback"), ""},
 		{"admin unset, terminal on", with("SWITCHBOARD_ADMIN_AUTH", "", term, "on"), term + "=on needs admin sign-in"},
-		{"admin unset, terminal off", with("SWITCHBOARD_ADMIN_AUTH", "", term, "off"), term + "=off needs admin sign-in"},
+		{"admin unset, terminal off", with("SWITCHBOARD_ADMIN_AUTH", "", term, "off"), ""},
 		{"proxy secret, terminal on", with("SWITCHBOARD_ADMIN_AUTH", "", term, "on", "SWITCHBOARD_ADMIN_PROXY_TOKEN", "proxy-secret"), ""},
 		{"old name", with("SWITCHBOARD_HOSTING", ""), ""},
 	} {

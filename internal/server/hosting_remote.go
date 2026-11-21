@@ -27,8 +27,9 @@ import (
 // remoteSettings is the remote listener: addr is "" when none is set; allow
 // is nil when there is no address limit.
 type remoteSettings struct {
-	addr  string
-	allow []netip.Prefix
+	addr     string
+	allow    []netip.Prefix
+	wildcard bool // addr binds every interface (0.0.0.0, [::] or an empty host)
 }
 
 // inAllow reports whether a is inside allow, or allow is empty (no limit).
@@ -53,9 +54,12 @@ func hostingRemote(getenv func(string) string) (remoteSettings, error) {
 		return remoteSettings{}, fmt.Errorf("%s %q is not IP:port", from, addr)
 	}
 	ip, err := netip.ParseAddr(host)
+	wildcard := host == "" || err == nil && ip.IsUnspecified()
 	switch {
-	case host == "" || err == nil && ip.IsUnspecified():
-		return remoteSettings{}, errors.New(from + " " + addr + " binds every interface (give one IP address)")
+	case wildcard:
+		// A container cannot know its outside address, so a wildcard bind is
+		// accepted; SWITCHBOARD_HOSTING_REMOTE_ALLOW, when set, still limits
+		// the peers.
 	case strings.EqualFold(host, "localhost") || err == nil && ip.IsLoopback():
 		return remoteSettings{}, errors.New(from + " " + addr + " is a loopback address (LISTEN_ADDR already serves loopback)")
 	case err != nil:
@@ -63,7 +67,7 @@ func hostingRemote(getenv func(string) string) (remoteSettings, error) {
 	case !inAllow(ip, allow):
 		return remoteSettings{}, errors.New(from + " " + addr + " is outside " + allowFrom + " (" + prefixList(allow) + ")")
 	}
-	return remoteSettings{addr: addr, allow: allow}, nil
+	return remoteSettings{addr: addr, allow: allow, wildcard: wildcard}, nil
 }
 
 func prefixList(allow []netip.Prefix) string {
