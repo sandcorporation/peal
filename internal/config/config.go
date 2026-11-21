@@ -152,27 +152,27 @@ func HostingAllowChecks(getenv func(string) string) bool {
 // SWITCHBOARD_HOSTING_MAX is unset (#190).
 const DefaultHostingMax = 4
 
-// Remote nodes (#329): a hosting host may open a second listener on a
-// private-network address for nodes on other machines, and both sides accept
-// only addresses inside the allowed ranges.
+// Remote nodes (#329): a hosting host may open a second listener for nodes on
+// other machines. With SWITCHBOARD_HOSTING_REMOTE_ALLOW set, both sides accept
+// only addresses inside its ranges; unset, they accept any address (the node
+// channel is authenticated by the node's token).
 const (
 	// HostingRemoteListenName is the host's second listener (IP:port, unset:
 	// none). It serves the node channel and the role API only.
 	HostingRemoteListenName = "HOSTING_REMOTE_LISTEN"
 	// HostingRemoteAllowName lists the CIDR ranges (comma-separated) the
 	// remote listener's address and peers, and a node's --host, must be in.
+	// Unset or blank: no limit.
 	HostingRemoteAllowName = "HOSTING_REMOTE_ALLOW"
-	// DefaultHostingRemoteAllow is the Tailscale address ranges.
-	DefaultHostingRemoteAllow = "100.64.0.0/10,fd7a:115c:a1e9::/48" // leak-guard:allow
 )
 
-// HostingRemoteAllow reads SWITCHBOARD_HOSTING_REMOTE_ALLOW through getenv
-// (DefaultHostingRemoteAllow when unset). from names the variable, for
-// messages.
+// HostingRemoteAllow reads SWITCHBOARD_HOSTING_REMOTE_ALLOW through getenv: a
+// CIDR list, or nil (no limit) when unset or blank. from names the variable,
+// for messages.
 func HostingRemoteAllow(getenv func(string) string) (allow []netip.Prefix, from string, err error) {
 	v, from := EnvFrom(getenv, HostingRemoteAllowName)
 	if strings.TrimSpace(v) == "" {
-		v = DefaultHostingRemoteAllow
+		return nil, from, nil
 	}
 	allow, err = parsePrefixes(v, from)
 	return allow, from, err

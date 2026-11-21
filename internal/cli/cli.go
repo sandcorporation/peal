@@ -262,7 +262,7 @@ var commands = []command{
 			{"--node", "NAME", "name of this machine's node, as host add --node names it (default local)"},
 		}},
 	{name: "node", args: "[invite NAME]", nargs: 2, optArgs: true,
-		summary: "Run a node for this machine attached to a hosting instance (on loopback, or at its private-network listener SWITCHBOARD_HOSTING_REMOTE_LISTEN); node invite NAME prints a one-time join code (15 min) from this instance's database (DB_PATH)",
+		summary: "Run a node for this machine attached to a hosting instance (on loopback, or at its remote listener SWITCHBOARD_HOSTING_REMOTE_LISTEN); node invite NAME prints a one-time join code (15 min) from this instance's database (DB_PATH)",
 		options: []option{
 			{"--host", "URL", "the instance's URL, e.g. http://127.0.0.1:8090 or http://100.64.0.10:8091"}, // leak-guard:allow
 			{"--join", "CODE", "exchange a code from node invite for this node's token, saved to --token-file"},

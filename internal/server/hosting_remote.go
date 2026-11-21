@@ -17,15 +17,23 @@ import (
 )
 
 // Remote nodes (#329): with SWITCHBOARD_HOSTING_REMOTE_LISTEN set, a hosting
-// host opens a second listener on a private-network address for nodes on
-// other machines. It serves the node channel and the role API to peers inside
-// SWITCHBOARD_HOSTING_REMOTE_ALLOW, and nothing of the admin side: admin API,
-// dashboard, setup, sign-in and the browser terminal stay on loopback.
+// host opens a second listener for nodes on other machines. It serves the node
+// channel and the role API, and nothing of the admin side: admin API,
+// dashboard, setup, sign-in and the browser terminal stay on LISTEN_ADDR.
+// SWITCHBOARD_HOSTING_REMOTE_ALLOW, when set, limits the listener's address,
+// its peers and a node's --host to its ranges; unset, any address is accepted
+// and the node token is the only gate (#366 §2).
 
-// remoteSettings is the remote listener: addr is "" when none is set.
+// remoteSettings is the remote listener: addr is "" when none is set; allow
+// is nil when there is no address limit.
 type remoteSettings struct {
 	addr  string
 	allow []netip.Prefix
+}
+
+// inAllow reports whether a is inside allow, or allow is empty (no limit).
+func inAllow(a netip.Addr, allow []netip.Prefix) bool {
+	return len(allow) == 0 || config.AddrAllowed(a, allow)
 }
 
 // hostingRemote reads the remote listener settings. The error names every
@@ -47,12 +55,12 @@ func hostingRemote(getenv func(string) string) (remoteSettings, error) {
 	ip, err := netip.ParseAddr(host)
 	switch {
 	case host == "" || err == nil && ip.IsUnspecified():
-		return remoteSettings{}, errors.New(from + " " + addr + " binds every interface (give one private-network address)")
+		return remoteSettings{}, errors.New(from + " " + addr + " binds every interface (give one IP address)")
 	case strings.EqualFold(host, "localhost") || err == nil && ip.IsLoopback():
 		return remoteSettings{}, errors.New(from + " " + addr + " is a loopback address (LISTEN_ADDR already serves loopback)")
 	case err != nil:
 		return remoteSettings{}, errors.New(from + " " + addr + " names a host; give an IP address")
-	case !config.AddrAllowed(ip, allow):
+	case !inAllow(ip, allow):
 		return remoteSettings{}, errors.New(from + " " + addr + " is outside " + allowFrom + " (" + prefixList(allow) + ")")
 	}
 	return remoteSettings{addr: addr, allow: allow}, nil
@@ -67,7 +75,7 @@ func prefixList(allow []netip.Prefix) string {
 }
 
 // remoteHandler is the remote listener's handler: a forwarded request or a
-// peer outside allow is refused (403), and only the role API and the node
+// peer outside a non-empty allow is refused (403), and only the role API and the node
 // channel are served; every other path is 404.
 func (s *Server) remoteHandler(allow []netip.Prefix) http.Handler {
 	inner := s.handler()
@@ -104,7 +112,7 @@ func forwardedRequest(r *http.Request) bool {
 
 func peerAllowed(remoteAddr string, allow []netip.Prefix) bool {
 	ap, err := netip.ParseAddrPort(remoteAddr)
-	return err == nil && config.AddrAllowed(ap.Addr(), allow)
+	return err == nil && inAllow(ap.Addr(), allow)
 }
 
 // remotePath reports whether the remote listener serves path: /api/… except
@@ -126,16 +134,17 @@ func remotePath(p string) bool {
 // nodeLookupTimeout bounds resolving a node's --host name.
 const nodeLookupTimeout = 10 * time.Second
 
-// checkNodeHost accepts an http(s) URL of a loopback host, or of a host whose
-// every address is loopback or inside allow (SWITCHBOARD_HOSTING_REMOTE_ALLOW
-// on the node). lookup resolves a host name.
+// checkNodeHost accepts an http(s) URL. With allow set
+// (SWITCHBOARD_HOSTING_REMOTE_ALLOW on the node), the host must be loopback or
+// every address it resolves to must be loopback or inside allow; with allow
+// empty, any host is accepted unresolved. lookup resolves a host name.
 func checkNodeHost(hostURL string, allow []netip.Prefix, lookup func(context.Context, string) ([]netip.Addr, error)) error {
 	u, err := url.Parse(hostURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("node: --host %q is not an http:// or https:// URL", hostURL)
 	}
 	h := u.Hostname()
-	if loopbackHost(h) {
+	if loopbackHost(h) || len(allow) == 0 {
 		return nil
 	}
 	const name = config.EnvPrefix + config.HostingRemoteAllowName
@@ -143,7 +152,7 @@ func checkNodeHost(hostURL string, allow []netip.Prefix, lookup func(context.Con
 		if !ip.IsUnspecified() && config.AddrAllowed(ip, allow) {
 			return nil
 		}
-		return fmt.Errorf("node: --host %s is neither loopback nor inside %s (%s); attach to the host's private-network listener (%s%s)", h, name, prefixList(allow), config.EnvPrefix, config.HostingRemoteListenName)
+		return fmt.Errorf("node: --host %s is neither loopback nor inside %s (%s); attach to the host's remote listener (%s%s)", h, name, prefixList(allow), config.EnvPrefix, config.HostingRemoteListenName)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), nodeLookupTimeout)
 	defer cancel()
@@ -156,7 +165,7 @@ func checkNodeHost(hostURL string, allow []netip.Prefix, lookup func(context.Con
 	}
 	for _, a := range addrs {
 		if !a.Unmap().IsLoopback() && !config.AddrAllowed(a, allow) {
-			return fmt.Errorf("node: --host %s resolves to %s, outside %s (%s); attach to the host's private-network listener (%s%s)", h, a.Unmap(), name, prefixList(allow), config.EnvPrefix, config.HostingRemoteListenName)
+			return fmt.Errorf("node: --host %s resolves to %s, outside %s (%s); attach to the host's remote listener (%s%s)", h, a.Unmap(), name, prefixList(allow), config.EnvPrefix, config.HostingRemoteListenName)
 		}
 	}
 	return nil

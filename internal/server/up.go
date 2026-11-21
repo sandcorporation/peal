@@ -33,8 +33,8 @@ const (
 // hosting on, listening on 127.0.0.1:port, with its database in dataDir; a
 // node for this machine runs in the same process and attaches to it over
 // loopback HTTP with the node token kept in dataDir (created on first start,
-// mode 0600). Every refusal of SWITCHBOARD_HOSTING=on still applies (the
-// admin mode must be builtin or oidc). The listener is bound before the
+// mode 0600). Every refusal of SWITCHBOARD_HOSTING=on still applies
+// (hostingStart). The listener is bound before the
 // node's backend (tmux server, keeper) is touched, so a port held by
 // another process ends up at once with nothing left running. It returns
 // only when start-up fails; otherwise it serves until SIGINT or SIGTERM.
@@ -108,8 +108,9 @@ func Up(v, dataDir string, port int, nodeName string) (err error) {
 // code it first exchanges the code for a token and writes tokenFile (user
 // only; an existing file is never replaced). restartSessions stops every
 // session at start so each relaunches with resume; allowChecks lets the host
-// run scheduled runs' prechecks here (#334). The host is loopback or
-// inside SWITCHBOARD_HOSTING_REMOTE_ALLOW (checkNodeHost).
+// run scheduled runs' prechecks here (#334). With
+// SWITCHBOARD_HOSTING_REMOTE_ALLOW set, the host is loopback or inside it
+// (checkNodeHost).
 func Node(v, hostURL, tokenFile, joinCode string, restartSessions, allowChecks bool) error {
 	allow, _, err := config.HostingRemoteAllow(os.Getenv)
 	if err != nil {

@@ -155,10 +155,12 @@ func TestJoinRouteAnswers(t *testing.T) {
 	}
 }
 
-// TestNodeRefusesAHostOutsideTheRanges: names are covered with an injected
-// resolver in TestCheckNodeHost.
+// TestNodeRefusesAHostOutsideTheRanges: with SWITCHBOARD_HOSTING_REMOTE_ALLOW
+// set on the node, a host outside it is refused before anything is written.
+// Names are covered with an injected resolver in TestCheckNodeHost; no range
+// at all in TestCheckNodeHostWithoutRange. Not parallel: it sets the env.
 func TestNodeRefusesAHostOutsideTheRanges(t *testing.T) {
-	t.Parallel()
+	t.Setenv("SWITCHBOARD_HOSTING_REMOTE_ALLOW", "100.64.0.0/10") // leak-guard:allow
 	dir := t.TempDir()
 	for _, host := range []string{"http://192.0.2.10:8090", "https://[2001:db8::1]:8090"} {
 		err := Node("test", host, filepath.Join(dir, "node.token"), "sbj_x", false, false)

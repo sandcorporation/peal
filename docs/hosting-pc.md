@@ -677,7 +677,7 @@ Reinstall: a removed node (revoked in the dashboard, Settings) cannot come back 
 
 ## Node on another machine
 
-A node on a second machine runs hosted sessions there for the instance above (the host). The node machine needs only the binary, the agent and a private-network path to the host; it runs no server and no database. The host listens for it on its private-network address, `100.64.0.10:8091` below. Other values: <!-- leak-guard:allow -->
+A node on a second machine runs hosted sessions there for the instance above (the host). The node machine needs only the binary, the agent and a network path to the host; it runs no server and no database. The host listens for it on one of its addresses, `100.64.0.10:8091` below. Other values: <!-- leak-guard:allow -->
 
 | Value | Windows | Linux |
 | --- | --- | --- |
@@ -688,13 +688,13 @@ A node on a second machine runs hosted sessions there for the instance above (th
 
 The host gives each session on the node its own credential of the session's base role over the node channel. The node writes it into its profile folder as `hosted-<record id>.json` (user-only: mode 0600, a protected DACL on Windows) and starts the session with `SWITCHBOARD_PROFILE=hosted-<record id>`; the role's own token never leaves the host machine and no profile is copied by hand. `--profile` of `host add` is still required but the node does not read it. The credential stops working (401) when the record is removed, the node is revoked or the role is revoked; a node that lost its profile folder gets new ones when it attaches. The host's own node (`local`) keeps using the profiles named in its records.
 
-### H1. Open the host to the private network
+### H1. Open the host to the node machine
 
-On the host machine, add the remote listener to the start file and restart: on Windows add `set SWITCHBOARD_HOSTING_REMOTE_LISTEN=100.64.0.10:8091` after the `SWITCHBOARD_HOSTING_AGENT` line of the W6 block and run W6 again; on Linux add `Environment=SWITCHBOARD_HOSTING_REMOTE_LISTEN=100.64.0.10:8091` after the `SWITCHBOARD_HOSTING_AGENT` line of the L6 block and run L6 again. Use the host's own address on the private network (Tailscale: `tailscale ip -4`). <!-- leak-guard:allow -->
+On the host machine, add the remote listener to the start file and restart: on Windows add `set SWITCHBOARD_HOSTING_REMOTE_LISTEN=100.64.0.10:8091` after the `SWITCHBOARD_HOSTING_AGENT` line of the W6 block and run W6 again; on Linux add `Environment=SWITCHBOARD_HOSTING_REMOTE_LISTEN=100.64.0.10:8091` after the `SWITCHBOARD_HOSTING_AGENT` line of the L6 block and run L6 again. Use an address of the host that the node machine reaches. <!-- leak-guard:allow -->
 
 Check: `up.log` shows `switchboard remote listener on 100.64.0.10:8091 (node channel and role API; …)` besides `switchboard listening on 127.0.0.1:8090`. <!-- leak-guard:allow -->
 
-If it fails: `up` refuses the address (see [Refusals](#refusals)) → it is not inside `SWITCHBOARD_HOSTING_REMOTE_ALLOW` (default `100.64.0.0/10,fd7a:115c:a1e9::/48`), is a wildcard, a host name or loopback; use the machine's own private-network IP. <!-- leak-guard:allow -->
+If it fails: `up` refuses the address (see [Refusals](#refusals)) → it is a wildcard, a host name or loopback, or outside `SWITCHBOARD_HOSTING_REMOTE_ALLOW` when that is set; use one of the machine's own IP addresses. To limit the listener and its peers to some ranges, also set `SWITCHBOARD_HOSTING_REMOTE_ALLOW` (CIDR list) on the host and the node; unset, any address is accepted and the node token is the gate.
 
 ### H2. Invite the node
 
@@ -1104,11 +1104,8 @@ Providers that only speak OAuth 2.0 (GitHub and similar) are not supported: they
 
 | Message (in `up.log`, `admin-setup.log`, `setup.log` or on the console) | Fix |
 | --- | --- |
-| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_ADMIN_AUTH must be builtin or oidc (got unset)` | `up` was started without `SWITCHBOARD_ADMIN_AUTH=builtin`; start it through `up.cmd` / the unit, or set the variable as in W5 / L5. |
-| `SWITCHBOARD_HOSTING=on refused: LISTEN_ADDR … is not a loopback address (127.0.0.0/8, ::1 or localhost)` | Hosting runs only on loopback. Start it with `switchboard up`, which listens on `127.0.0.1`; do not run the plain server with `SWITCHBOARD_HOSTING=on`. |
-| `SWITCHBOARD_HOSTING=on refused: DB_PATH is unset; name this instance's own database` / `DB_PATH is the container default /data/mail.db; …` | Same: use `switchboard up --data <dir>`. |
 | `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL must be loopback, on or off (got …)` | Fix the value, or remove it for the default `loopback`. |
-| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in: …` | Set `SWITCHBOARD_ADMIN_AUTH` (builtin or oidc) or `SWITCHBOARD_ADMIN_PROXY_TOKEN`, or use `loopback`. |
+| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in: …` (or `=off`) | Set `SWITCHBOARD_ADMIN_AUTH` (builtin or oidc) or `SWITCHBOARD_ADMIN_PROXY_TOKEN`, or use `loopback`. |
 | 「이 주소에서는 터미널이 꺼져 있음」 on the terminal screen | `SWITCHBOARD_HOSTING_TERMINAL` is `loopback` (the default) and the page is not opened from this machine directly, or it is `off`. |
 | `host: DB_PATH is unset; …` | `host` ran without `DB_PATH`; run it as `sbpc host …`. |
 | `profile "pc-worker" not found (…)` | The command ran without `SWITCHBOARD_CONFIG_DIR`; run it through `sbpc`. |
@@ -1146,4 +1143,4 @@ On any machine with the role's profile and no `DB_PATH`, `host add|list|start|st
 
 ## Operations deployment
 
-The operations deployment (`compose.yaml`, the Jenkins deploy) never sets `SWITCHBOARD_HOSTING`; `internal/config/opsguard_test.go` fails the build if `compose.yaml` does. Terminal hosting runs only in an instance started with `switchboard up` on the PC that runs the sessions.
+The operations deployment (`compose.yaml`, the Jenkins deploy) may pass `SWITCHBOARD_HOSTING*` through, but only from its deploy `.env`: `internal/config/opsguard_test.go` fails the build when an operations file writes an address into a hosting variable, or when a compose file sets one other than as `${NAME:-}` (empty by default). With hosting on, the plain server is a host only and runs no node; sessions run on nodes attached over the remote listener, or in an instance started with `switchboard up` on the PC that runs them.

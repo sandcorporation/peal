@@ -185,7 +185,11 @@ func run(v string, ln net.Listener, setupDir string, attach attachFunc) {
 				fatal(err)
 			}
 			remote = &http.Server{Handler: s.remoteHandler(rs.allow), ReadHeaderTimeout: 10 * time.Second}
-			log.Printf("switchboard remote listener on %s (node channel and role API; peers in %s)", rs.addr, prefixList(rs.allow))
+			peers := "any peer"
+			if len(rs.allow) > 0 {
+				peers = "peers in " + prefixList(rs.allow)
+			}
+			log.Printf("switchboard remote listener on %s (node channel and role API; %s)", rs.addr, peers)
 			goSafe("remote listener", func() {
 				if err := remote.Serve(rln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 					fatal(err)
