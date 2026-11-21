@@ -46,9 +46,19 @@ func (b *Backend) Stream(ctx context.Context, name string) (io.ReadCloser, error
 		return nil, fmt.Errorf("stream %s: %w", name, err)
 	}
 	pr, pw := io.Pipe()
-	s := &stream{pr: pr, stdin: stdin, cmd: cmd, done: make(chan struct{})}
+	s := &stream{pr: pr, stdin: stdin, cmd: cmd, done: make(chan struct{}), ready: make(chan struct{})}
 	go s.pump(stdout, pw)
 	s.stopWatch = context.AfterFunc(ctx, func() { _ = s.Close() })
+	// cmd.Start returns before the client has attached; output printed
+	// before it has is neither streamed nor in a snapshot taken meanwhile.
+	// tmux answers the subscription command only once the client is
+	// attached, so wait for that answer.
+	select {
+	case <-s.ready:
+	case <-s.done: // the client ended; Read reports EOF
+	case <-ctx.Done():
+	case <-time.After(attachWait):
+	}
 	return s, nil
 }
 
@@ -57,6 +67,8 @@ type stream struct {
 	stdin     io.WriteCloser
 	cmd       *exec.Cmd
 	done      chan struct{}
+	ready     chan struct{} // closed by the first command reply
+	readyOnce sync.Once
 	stopWatch func() bool
 	once      sync.Once
 }
@@ -84,6 +96,9 @@ func (s *stream) Close() error {
 
 // deadSettle is how long the stream keeps reading after the pane dies: tmux
 // can report the death before the program's last output.
+// attachWait bounds the wait for the client's first reply.
+const attachWait = 5 * time.Second
+
 const deadSettle = 200 * time.Millisecond
 
 type event int
@@ -156,6 +171,8 @@ loop:
 // handle processes one control-mode line.
 func (s *stream) handle(line []byte, pw *io.PipeWriter) event {
 	switch {
+	case bytes.HasPrefix(line, []byte("%end ")) || bytes.HasPrefix(line, []byte("%error ")):
+		s.readyOnce.Do(func() { close(s.ready) })
 	case bytes.HasPrefix(line, []byte("%output ")):
 		// %output %<pane> <data>
 		rest := line[len("%output "):]
