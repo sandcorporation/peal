@@ -1105,7 +1105,7 @@ Providers that only speak OAuth 2.0 (GitHub and similar) are not supported: they
 | Message (in `up.log`, `admin-setup.log`, `setup.log` or on the console) | Fix |
 | --- | --- |
 | `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL must be loopback, on or off (got …)` | Fix the value, or remove it for the default `loopback`. |
-| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in: …` (or `=off`) | Set `SWITCHBOARD_ADMIN_AUTH` (builtin or oidc) or `SWITCHBOARD_ADMIN_PROXY_TOKEN`, or use `loopback`. |
+| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in: …` | Set `SWITCHBOARD_ADMIN_AUTH` (builtin or oidc) or `SWITCHBOARD_ADMIN_PROXY_TOKEN`, or use `loopback` or `off`. |
 | 「이 주소에서는 터미널이 꺼져 있음」 on the terminal screen | `SWITCHBOARD_HOSTING_TERMINAL` is `loopback` (the default) and the page is not opened from this machine directly, or it is `off`. |
 | `host: DB_PATH is unset; …` | `host` ran without `DB_PATH`; run it as `sbpc host …`. |
 | `profile "pc-worker" not found (…)` | The command ran without `SWITCHBOARD_CONFIG_DIR`; run it through `sbpc`. |

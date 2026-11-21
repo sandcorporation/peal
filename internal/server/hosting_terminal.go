@@ -16,8 +16,8 @@ import (
 //     default, config.DefaultHostingTerminal) answers loopback peers that
 //     carry no proxy forwarding header; on answers any listener and address;
 //     off answers 404 everywhere.
-//   - any mode but loopback (on, off) needs admin sign-in to be configured
-//     (builtin, oidc or the proxy secret), or hosting does not start
+//   - mode on needs admin sign-in to be configured (builtin, oidc or the
+//     proxy secret), or hosting does not start; off and loopback need none
 //     (terminalStart). This is the only admin-auth condition of the hosting
 //     start (hostingStart, #366 §2).
 //   - SWITCHBOARD_HOSTING_TERMINAL_ALLOW (optional CIDR list): a client
@@ -49,7 +49,7 @@ func terminalSettings(getenv func(string) string) (terminalAccess, error) {
 }
 
 // terminalStart is hostingStart's check of the terminal settings: valid
-// values, and admin sign-in configured when the mode is not loopback. The error names
+// values, and admin sign-in configured when the mode is on. The error names
 // every failing condition, joined by "; ".
 func terminalStart(getenv func(string) string) error {
 	var failed []string
@@ -60,7 +60,7 @@ func terminalStart(getenv func(string) string) error {
 	if _, _, err := config.HostingTerminalAllow(getenv); err != nil {
 		failed = append(failed, err.Error())
 	}
-	if err == nil && mode != config.TerminalLoopback && !adminSignInConfigured(getenv) {
+	if err == nil && mode == config.TerminalOn && !adminSignInConfigured(getenv) {
 		failed = append(failed, from+"="+mode+" needs admin sign-in: set "+config.EnvPrefix+"ADMIN_AUTH (builtin or oidc) or "+config.EnvPrefix+"ADMIN_PROXY_TOKEN")
 	}
 	if len(failed) > 0 {

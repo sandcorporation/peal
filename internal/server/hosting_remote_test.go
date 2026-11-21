@@ -44,9 +44,10 @@ func TestHostingRemoteListenRefusals(t *testing.T) {
 		{"outside the range", with(listen, "192.0.2.10:8091"), listen + " 192.0.2.10:8091 is outside SWITCHBOARD_HOSTING_REMOTE_ALLOW (100.64.0.0/10,2001:db8:1::/48)"}, // leak-guard:allow
 		{"no range, any address", with(listen, "192.0.2.10:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", ""), ""},
 		{"no range, ipv6", with(listen, "[2001:db8::10]:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", " "), ""},
-		{"all ipv4", with(listen, "0.0.0.0:8091"), listen + " 0.0.0.0:8091 binds every interface"},
-		{"all ipv6", with(listen, "[::]:8091"), listen + " [::]:8091 binds every interface"},
-		{"empty host", with(listen, ":8091"), listen + " :8091 binds every interface"},
+		{"all ipv4", with(listen, "0.0.0.0:8091"), ""},
+		{"all ipv6", with(listen, "[::]:8091"), ""},
+		{"empty host", with(listen, ":8091"), ""},
+		{"all ipv4, own range", with(listen, "0.0.0.0:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", "192.0.2.0/24"), ""},
 		{"host name", with(listen, "pc.example:8091"), listen + " pc.example:8091 names a host; give an IP address"},
 		{"loopback", with(listen, "127.0.0.1:8091"), listen + " 127.0.0.1:8091 is a loopback address"},
 		{"localhost", with(listen, "localhost:8091"), listen + " localhost:8091 is a loopback address"},
@@ -67,12 +68,20 @@ func TestHostingRemoteListenRefusals(t *testing.T) {
 		}
 	}
 	// Two failures are named in one refusal, as the other conditions are.
-	_, err := hostingStart(fakeEnv(with(listen, "0.0.0.0:8091", "SWITCHBOARD_HOSTING_TERMINAL", "on")))
-	if err == nil || !strings.Contains(err.Error(), "binds every interface (give one IP address); SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in") {
+	_, err := hostingStart(fakeEnv(with(listen, "localhost:8091", "SWITCHBOARD_HOSTING_TERMINAL", "on")))
+	if err == nil || !strings.Contains(err.Error(), "loopback address (LISTEN_ADDR already serves loopback); SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in") {
 		t.Errorf("two failures: %v", err)
 	}
 	if r, err := hostingRemote(fakeEnv(with(listen, "100.64.0.10:8091"))); err != nil || r.addr != "100.64.0.10:8091" || len(r.allow) != 2 { // leak-guard:allow
 		t.Errorf("settings = %+v %v", r, err)
+	}
+	for _, a := range []string{"0.0.0.0:8096", "[::]:8096", ":8096"} {
+		if r, err := hostingRemote(fakeEnv(with(listen, a, "SWITCHBOARD_HOSTING_REMOTE_ALLOW", ""))); err != nil || r.addr != a || !r.wildcard || r.allow != nil {
+			t.Errorf("%s: settings = %+v %v", a, r, err)
+		}
+		if r, err := hostingRemote(fakeEnv(with(listen, a, "SWITCHBOARD_HOSTING_REMOTE_ALLOW", "192.0.2.0/24"))); err != nil || !r.wildcard || len(r.allow) != 1 {
+			t.Errorf("%s with range: settings = %+v %v", a, r, err)
+		}
 	}
 	if r, err := hostingRemote(fakeEnv(with(listen, "192.0.2.10:8091", "SWITCHBOARD_HOSTING_REMOTE_ALLOW", ""))); err != nil || r.addr != "192.0.2.10:8091" || r.allow != nil {
 		t.Errorf("no range: settings = %+v %v", r, err)
