@@ -65,6 +65,8 @@ type Admin struct {
 	// Origin reports whether a WebSocket's Origin is allowed: the rule of
 	// /api/admin/live.
 	Origin func(r *http.Request) bool
+	// ClientIP is r's client address for the log (nil: the peer address).
+	ClientIP func(r *http.Request) string
 	// Recheck is how often an open socket re-checks the session (0:
 	// ViewerRecheck). Queue is the viewer queue (0: ViewerQueue).
 	Recheck time.Duration
@@ -149,6 +151,7 @@ type viewer struct {
 	id    string
 	mode  string // ModeView or ModeInput
 	user  string // the signed-in admin
+	ip    string // the client address (Admin.ClientIP)
 	out   chan viewerFrame
 	gone  chan struct{} // closed when the hub drops it as too slow
 	state string        // the state last sent
@@ -305,7 +308,7 @@ func (h *Hub) applySize(v *viewer, c *nodeConn, cols, rows int) {
 
 // audit appends a terminal_log row for v; failures are logged, not fatal.
 func (h *Hub) audit(v *viewer, kind string, at int64, bytes int) {
-	if err := h.svc.logTerminal(v.id, v.user, kind, at, bytes); err != nil {
+	if err := h.svc.logTerminal(v.id, v.user, kind, at, bytes, v.mode, v.ip); err != nil {
 		log.Printf("hosting: terminal log: %v", err)
 	}
 }
@@ -526,7 +529,11 @@ func (h *Hub) terminalSocket(w http.ResponseWriter, r *http.Request, id string) 
 		}
 		return ws.Write(wctx, typ, f.data) == nil
 	}
-	v := &viewer{id: id, mode: mode, user: user, out: make(chan viewerFrame, a.Queue), gone: make(chan struct{}), state: rec.Runtime.State}
+	ip := r.RemoteAddr
+	if a.ClientIP != nil {
+		ip = a.ClientIP(r)
+	}
+	v := &viewer{id: id, mode: mode, user: user, ip: ip, out: make(chan viewerFrame, a.Queue), gone: make(chan struct{}), state: rec.Runtime.State}
 	hello := wire.TerminalMessage{Type: "hello", State: rec.Runtime.State, Cols: rec.Cols, Rows: rec.Rows}
 	if wctx, done := context.WithTimeout(ctx, viewerWriteTTL); wsjson.Write(wctx, ws, hello) != nil {
 		done()

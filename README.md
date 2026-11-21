@@ -364,6 +364,20 @@ GitHub Actions builds versioned archives for Windows, Linux, and macOS (amd64 an
 
 A hosting instance on a PC (`switchboard up`, Windows and Linux, separate from the operations instance): [docs/hosting-pc.md](docs/hosting-pc.md).
 
+### Hosting: browser terminal access
+
+```sh
+SWITCHBOARD_HOSTING_TERMINAL=loopback   # default; or on, off
+SWITCHBOARD_HOSTING_TERMINAL_ALLOW=198.51.100.0/24,2001:db8::/32   # optional
+```
+
+- `loopback`: the terminal's ticket and socket answer requests from a loopback peer without proxy forwarding headers; elsewhere 404.
+- `on`: any listener and address, for a signed-in admin. The server refuses to start unless admin sign-in is set (`SWITCHBOARD_ADMIN_AUTH` builtin or oidc, or `SWITCHBOARD_ADMIN_PROXY_TOKEN`).
+- `off`: 404 everywhere.
+- `SWITCHBOARD_HOSTING_TERMINAL_ALLOW`: when set, a client address outside the ranges gets 403. With `SWITCHBOARD_TRUST_FORWARDED=1` the client address is the one the nearest proxy forwarded, as for admin login.
+
+The socket also checks `Origin` and takes a single-use ticket. Opening and closing a terminal socket is logged with the admin, time, view/input and client address (the dashboard's 기록 tab); typed text is not stored. Where the setting refuses, the dashboard's terminal screen shows why.
+
 ### Hosting: nodes on other machines
 
 A hosting host listens on loopback only (`LISTEN_ADDR`). For nodes on other machines it can open a second listener on a private-network address:

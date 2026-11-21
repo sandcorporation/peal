@@ -59,6 +59,7 @@ type Server struct {
 	publicURL   string              // SWITCHBOARD_PUBLIC_URL; a WebSocket Origin it also accepts
 	setup       *adminauth.Setup    // first-run admin setup; only up opens it (setup.go), nil answers 404
 	hosting     bool                // SWITCHBOARD_HOSTING=on (hosting.go); off answers every hosting route 404
+	terminal    terminalAccess      // SWITCHBOARD_HOSTING_TERMINAL and …_ALLOW (hosting_terminal.go)
 	hubOnce     sync.Once
 	nodeHub     *hosting.Hub  // the node channel (hosting.go), built on first use
 	termLimits  hosting.Admin // browser terminal recheck and queue; tests shorten them (zero: the defaults)
@@ -126,6 +127,9 @@ func run(v string, ln net.Listener, setupDir string, attach attachFunc) {
 	}
 	s.discord = insight.ConfigureDiscord(os.Getenv)
 	if e = adminauth.Configure(&s.admin, os.Getenv); e != nil {
+		fatal(e)
+	}
+	if s.terminal, e = terminalSettings(os.Getenv); e != nil {
 		fatal(e)
 	}
 	if e = s.logRemindStart(); e != nil {
@@ -539,15 +543,20 @@ func (s *Server) adminAPI(w http.ResponseWriter, r *http.Request) {
 		// the terminal tab.
 		// With hosting on it also lists the terminal view's assets, which
 		// the page loads only then.
+		// terminal_refused is why this request could not open a terminal
+		// (hosting_terminal.go): off, loopback or allow; omitted when it can.
 		var assets []string
+		var refused string
 		if s.hosting {
 			assets = dashboard.TerminalAssets
+			refused = s.terminalRefusal(r)
 		}
 		writeJSON(w, struct {
 			adminauth.Identity
-			Hosting        bool     `json:"hosting"`
-			TerminalAssets []string `json:"terminal_assets,omitempty"`
-		}{who, s.hosting, assets})
+			Hosting         bool     `json:"hosting"`
+			TerminalAssets  []string `json:"terminal_assets,omitempty"`
+			TerminalRefused string   `json:"terminal_refused,omitempty"`
+		}{who, s.hosting, assets, refused})
 	case "slots":
 		out, err := s.presence().ActiveSlots("")
 		if err != nil {
