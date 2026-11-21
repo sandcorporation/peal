@@ -1726,7 +1726,7 @@ function termActs(v,box){
 }
 function termDir(d){const s=node('span','‎'+d+'‎','dir');s.title=d;return s}
 const termLogKind={attach:'연결',detach:'끊음',input:'입력'};
-const termEventKind={start:'시작',restart:'재시작',stop:'정지',crash:'비정상 종료',exit:'종료',adopt:'이어받음'};
+const termEventKind={start:'시작',restart:'재시작',stop:'정지',crash:'비정상 종료',exit:'종료',adopt:'이어받음',add:'추가',remove:'제거'};
 const termEventActor={admin:'관리자',policy:'재시작 규칙',node:'노드'};
 // termTable is a stack table with head labels and one row per item (rowOf: values and classes).
 function termTable(id,labels,items,rowOf){

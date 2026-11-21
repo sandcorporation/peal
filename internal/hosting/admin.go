@@ -127,7 +127,7 @@ func (s *Service) joinAPI(w http.ResponseWriter, r *http.Request) {
 
 // decode reads a JSON body of type T; unknown fields are refused so a
 // misspelt field is not silently dropped.
-func decode[T wire.HostedSessionCreate | wire.HostedSessionChange](w http.ResponseWriter, r *http.Request) (T, bool) {
+func decode[T wire.HostedSessionCreate | wire.HostedSessionChange | wire.HostGrant](w http.ResponseWriter, r *http.Request) (T, bool) {
 	var v T
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxBody))
 	dec.DisallowUnknownFields()
@@ -145,6 +145,8 @@ func writeResult(w http.ResponseWriter, ok int, h wire.HostedSession, err error)
 		writeJSON(w, ok, h)
 	case errors.As(err, &invalid):
 		http.Error(w, invalid.Error(), http.StatusBadRequest)
+	case errors.As(err, new(ForbiddenError)):
+		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, ErrDuplicate), errors.As(err, new(CapacityError)):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, ErrNotFound):
@@ -154,7 +156,7 @@ func writeResult(w http.ResponseWriter, ok int, h wire.HostedSession, err error)
 	}
 }
 
-func writeJSON[T wire.HostedSession | []wire.HostedSession | wire.HostingLimit | wire.NodeView | []wire.NodeView | wire.NodeJoined | wire.TerminalTicket | []wire.TerminalLogEntry | []wire.HostedEvent](w http.ResponseWriter, code int, v T) {
+func writeJSON[T wire.HostedSession | []wire.HostedSession | wire.HostingLimit | wire.NodeView | []wire.NodeView | wire.NodeJoined | wire.TerminalTicket | []wire.TerminalLogEntry | []wire.HostedEvent | wire.HostGrant | []wire.HostGrant](w http.ResponseWriter, code int, v T) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)

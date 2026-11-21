@@ -230,8 +230,8 @@ var commands = []command{
 			{"--status", "STATUS", "list: only pending, answered or withdrawn questions"},
 			optJSON, optProfile,
 		}},
-	{name: "host", args: "ACTION [ID]", nargs: 3, optArgs: true, extra: true, synopsis: "(ACTION: add | list | set ID | start ID | stop ID | restart ID | new-conversation ID | remove ID | limit [on|off] | auto add ID | auto list | auto show AUTO-ID | auto run AUTO-ID | auto pause AUTO-ID | auto resume AUTO-ID | auto rm AUTO-ID) [-- AGENT ARGS...]",
-		summary: "Manage hosted sessions in this instance's database (DB_PATH, not the container default): add a record, list them, change one's permission mode, set one to run or stop, restart one with resume (clears a crash loop), start one in a new conversation, remove one, show or set the subscription limit; auto: scheduled runs of a session (at each cron time in this machine's zone the host launches it when stopped and mails the prompt to its base role)",
+	{name: "host", args: "ACTION [ID]", nargs: 3, optArgs: true, extra: true, synopsis: "(ACTION: add | list | set ID | start ID | stop ID | restart ID | new-conversation ID | remove ID | limit [on|off] | grant ROLE | grant list | revoke-grant ROLE | auto add ID | auto list | auto show AUTO-ID | auto run AUTO-ID | auto pause AUTO-ID | auto resume AUTO-ID | auto rm AUTO-ID) [-- AGENT ARGS...]",
+		summary: "Manage hosted sessions in this instance's database (DB_PATH, not the container default): add a record, list them, change one's permission mode, set one to run or stop, restart one with resume (clears a crash loop), start one in a new conversation, remove one, show or set the subscription limit; grant: let a role add, list, start, stop and remove sessions under itself with its own token (base roles, nodes and directory roots; without DB_PATH, host runs as the profile's role within its grant); auto: scheduled runs of a session (at each cron time in this machine's zone the host launches it when stopped and mails the prompt to its base role)",
 		options: []option{
 			{"--node", "NAME", "add: node the session runs on"},
 			{"--base", "ROLE", "add: base role (must exist)"},
@@ -241,6 +241,7 @@ var commands = []command{
 			{"--parent", "ROLE", "add: parent role (SWITCHBOARD_PARENT)"},
 			{"--restart", "POLICY", "add: always (default), on-failure or never"},
 			{"--class", "CLASS", "add: lead, coordinator, execute (default) or review"},
+			{"--dir-root", "PATH[,PATH]", "grant: directory roots the role's sessions must be under (with --base ROLE[,ROLE] and --node NAME[,NAME])"},
 			{"--ask-permissions", "", "add: launch the agent in its normal permission mode (default: with its permission-skip arguments)"},
 			{"--skip-permissions", "on|off", "set: launch with (on) or without (off) the agent's permission-skip arguments, from the next launch or restart"},
 			{"--cron", "EXPR", "auto add: five-field cron expression, read in this machine's time zone"},
@@ -338,6 +339,7 @@ type Commands struct {
 	Admin      AdminFunc
 	Host       HostFunc
 	HostAuto   HostAutoFunc
+	HostGrant  HostGrantFunc
 	Up         UpFunc
 	Node       NodeFunc
 	NodeInvite NodeInviteFunc
@@ -354,7 +356,7 @@ var (
 // Run runs the client command in args (the arguments after the program name)
 // and returns the process exit code.
 func Run(args []string, buildVersion string, cmds Commands) int {
-	version, admin, host, hostAuto, binary = buildVersion, cmds.Admin, cmds.Host, cmds.HostAuto, cmds
+	version, admin, host, hostAuto, hostGrant, binary = buildVersion, cmds.Admin, cmds.Host, cmds.HostAuto, cmds.HostGrant, cmds
 	return runCLI(args)
 }
 

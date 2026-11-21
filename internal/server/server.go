@@ -317,6 +317,16 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	role := who.Role
 	w.Header().Set("Content-Type", "application/json")
 	path := strings.TrimPrefix(r.URL.Path, "/api/")
+	if s.hosting && hostingRolePath(path) {
+		// A numbered slot acts for its base role: grants and parents name
+		// roles, not slots.
+		caller := who.Base
+		if caller == "" {
+			caller = who.Role
+		}
+		s.hostingHub().RoleHostAPI(w, r, caller, strings.TrimPrefix(path, "host/"))
+		return
+	}
 	if path == "permissions" || strings.HasPrefix(path, "permissions/") {
 		s.asks().PermissionAPI(w, r, who, strings.TrimPrefix(strings.TrimPrefix(path, "permissions"), "/"))
 		return

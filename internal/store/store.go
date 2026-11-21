@@ -152,7 +152,26 @@ func Init(db *sql.DB) error {
 	if e = migrateHostAutoChecks(db); e != nil {
 		return e
 	}
-	return migrateHostAutoAlerts(db)
+	if e = migrateHostAutoAlerts(db); e != nil {
+		return e
+	}
+	return migrateHostGrants(db)
+}
+
+// migrateHostGrants adds host_grants (#369): per role, the base roles, nodes
+// and directory roots (JSON lists) it may host sessions of under itself with
+// its own token; and hosted_sessions.dir_root, the grant root a role's record
+// was added under (empty for the admin's).
+func migrateHostGrants(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS host_grants(role TEXT PRIMARY KEY, bases TEXT NOT NULL, nodes TEXT NOT NULL, dir_roots TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+		return err
+	}
+	has, err := HasColumn(db, "hosted_sessions", "dir_root")
+	if err != nil || has {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE hosted_sessions ADD COLUMN dir_root TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // migrateHostAutoAlerts adds host_autos.alert (#336): the result (error,
