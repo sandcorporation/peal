@@ -240,6 +240,7 @@ func TestTerminalAllowList(t *testing.T) {
 		if c == nil {
 			t.Fatalf("socket forwarded inside = %d", code)
 		}
+		readFrame(t, c, websocket.MessageText) // the hello: attach is logged once it is sent
 		c.CloseNow()
 		eventually(t, "the detach row", func() bool { return len(terminalPeerLog(t, r.s, r.id)) >= 2 })
 		if rows := terminalPeerLog(t, r.s, r.id); rows[0].ip != "198.51.100.9" {
