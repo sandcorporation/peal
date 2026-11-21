@@ -110,6 +110,9 @@ func Init(db *sql.DB) error {
 	if e = migrateTerminalLog(db); e != nil {
 		return e
 	}
+	if e = migrateTerminalLogPeer(db); e != nil {
+		return e
+	}
 	if e = migrateHostingLimit(db); e != nil {
 		return e
 	}
@@ -663,6 +666,23 @@ CREATE TABLE IF NOT EXISTS node_invites(code_hash TEXT PRIMARY KEY, name TEXT NO
 		}
 		if !has {
 			if _, err = db.Exec(`ALTER TABLE hosted_sessions ADD COLUMN ` + c + ` INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// migrateTerminalLogPeer adds terminal_log.mode (the socket's view or input)
+// and terminal_log.ip (the client address) (#367).
+func migrateTerminalLogPeer(db *sql.DB) error {
+	for _, c := range []string{"mode", "ip"} {
+		has, err := HasColumn(db, "terminal_log", c)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err = db.Exec(`ALTER TABLE terminal_log ADD COLUMN ` + c + ` TEXT NOT NULL DEFAULT ''`); err != nil {
 				return err
 			}
 		}

@@ -9,7 +9,8 @@ import (
 )
 
 // Terminal attach/input log (#173, #192): who attached to, detached from or
-// typed into a terminal and when. Input is a byte count per socket per
+// typed into a terminal, when, with which socket mode and from which client
+// address (#367). Input is a byte count per socket per
 // minute; its content is never stored.
 
 // Log kinds.
@@ -26,15 +27,16 @@ const (
 	logShown  = 100                 // rows the log route returns
 )
 
-// logTerminal appends one row; at is Unix ms.
-func (s *Service) logTerminal(session, user, kind string, at int64, bytes int) error {
-	_, err := s.db.Exec(`INSERT INTO terminal_log(session,admin_user,kind,at,bytes) VALUES(?,?,?,?,?)`, session, user, kind, at, bytes)
+// logTerminal appends one row; at is Unix ms, mode the socket's and ip the
+// client address.
+func (s *Service) logTerminal(session, user, kind string, at int64, bytes int, mode, ip string) error {
+	_, err := s.db.Exec(`INSERT INTO terminal_log(session,admin_user,kind,at,bytes,mode,ip) VALUES(?,?,?,?,?,?,?)`, session, user, kind, at, bytes, mode, ip)
 	return err
 }
 
 // TerminalLog is the newest rows of session's log, newest first.
 func (s *Service) TerminalLog(session string) ([]wire.TerminalLogEntry, error) {
-	rows, err := s.db.Query(`SELECT admin_user,kind,at,bytes FROM terminal_log WHERE session=? ORDER BY at DESC, id DESC LIMIT ?`, session, logShown)
+	rows, err := s.db.Query(`SELECT admin_user,kind,at,bytes,mode,ip FROM terminal_log WHERE session=? ORDER BY at DESC, id DESC LIMIT ?`, session, logShown)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +44,7 @@ func (s *Service) TerminalLog(session string) ([]wire.TerminalLogEntry, error) {
 	out := []wire.TerminalLogEntry{}
 	for rows.Next() {
 		var e wire.TerminalLogEntry
-		if err := rows.Scan(&e.AdminUser, &e.Kind, &e.At, &e.Bytes); err != nil {
+		if err := rows.Scan(&e.AdminUser, &e.Kind, &e.At, &e.Bytes, &e.Mode, &e.IP); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

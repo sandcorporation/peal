@@ -521,12 +521,14 @@ let adminMode='';
 let hostingOn=false;
 // termAssets are the terminal view's files, listed by /api/admin/me only with hosting on.
 let termAssets=[];
+// termRefused is why this address cannot open a terminal ('' when it can).
+let termRefused='';
 function signedOut(){if(adminMode&&adminMode!=='legacy')location.reload()}
 async function loadMe(){
   try{
     const r=await fetch('/api/admin/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});
     if(!r.ok)return;
-    const m=await r.json();adminMode=m.mode||'';hostingOn=m.hosting===true;termAssets=Array.isArray(m.terminal_assets)?m.terminal_assets:[];
+    const m=await r.json();adminMode=m.mode||'';hostingOn=m.hosting===true;termAssets=Array.isArray(m.terminal_assets)?m.terminal_assets:[];termRefused=typeof m.terminal_refused==='string'?m.terminal_refused:'';
     $('tab-terminals').hidden=!hostingOn;setViewButton('nodes').hidden=!hostingOn;
     if(hostingOn&&curTab==='settings')route();
     if(hostingOn&&location.hash.startsWith('#terminal'))route();
@@ -1726,6 +1728,7 @@ function termActs(v,box){
 }
 function termDir(d){const s=node('span','‎'+d+'‎','dir');s.title=d;return s}
 const termLogKind={attach:'연결',detach:'끊음',input:'입력'};
+const termLogMode={view:'보기',input:'입력'};
 const termEventKind={start:'시작',restart:'재시작',stop:'정지',crash:'비정상 종료',exit:'종료',adopt:'이어받음',add:'추가',remove:'제거'};
 const termEventActor={admin:'관리자',policy:'재시작 규칙',node:'노드'};
 // termTable is a stack table with head labels and one row per item (rowOf: values and classes).
@@ -1749,7 +1752,7 @@ async function termHistory(v,box){
   box.append(dl(pairs),node('h3','실행'));
   box.append(termTable('termEvents',['시각','종류','종료 코드','재시작','요청'],events,e=>[[when(e.at),termEventKind[e.kind]||e.kind,e.exit_code===null||e.exit_code===undefined?'-':String(e.exit_code),String(e.restarts||0),termEventActor[e.actor]||e.actor||'-'],['','','num','num','']]));
   box.append(node('h3','접속'));
-  box.append(termTable('termLog',['시각','관리자','종류','바이트'],rows,e=>[[when(e.at),e.admin_user,termLogKind[e.kind]||e.kind,e.kind==='input'?String(e.bytes):'-'],['','','','num']]));
+  box.append(termTable('termLog',['시각','관리자','종류','방식','주소','바이트'],rows,e=>[[when(e.at),e.admin_user,termLogKind[e.kind]||e.kind,termLogMode[e.mode]||e.mode||'-',e.ip||'-',e.kind==='input'?String(e.bytes):'-'],['','','','','mono','num']]));
 }
 // termSettings draws 설정: what the record runs and the fields a PUT changes.
 function termSettings(v,box){
@@ -1895,9 +1898,13 @@ function loadTermLib(){
   })().catch(e=>{termLib=null;throw e});
   return termLib;
 }
+// termRefusedText is why this address cannot open a terminal
+// (terminal_refused from /api/admin/me, SWITCHBOARD_HOSTING_TERMINAL).
+const termRefusedText={off:'터미널이 꺼져 있음',loopback:'이 주소에서는 터미널이 꺼져 있음 (이 기계에서만 열림)',allow:'이 주소는 터미널 허용 대역 밖'};
 // termPaneFor(v) returns the screen for a detail body; the terminal opens
 // once the body holds it, and stays open while the same record is shown.
 function termPaneFor(v){
+  if(termRefused)return node('p',termRefusedText[termRefused]||'이 주소에서는 터미널이 꺼져 있음','msg err');
   if(!termView||termView.id!==v.id)setTimeout(()=>{if((!termView||termView.id!==v.id)&&$('detailBody').contains(tp('termPane')))termOpen(v)},0);
   return tp('termPane');
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,22 +32,41 @@ type termRig struct {
 	cookie *http.Cookie
 	now    *time.Time
 	secret string
+	hdr    map[string]string // admin headers besides the cookie (the proxy secret)
 	fake   *termtest.Fake
 	id     string
 }
 
 func newTermRig(t *testing.T, limits hosting.Admin) *termRig {
 	t.Helper()
+	return newTermRigWith(t, limits, nil)
+}
+
+// newTermRigWith is newTermRig with prep run on the server before it serves
+// (the terminal setting, TrustForwarded).
+func newTermRigWith(t *testing.T, limits hosting.Admin, prep func(*Server)) *termRig {
+	t.Helper()
 	s, secret, now := builtinServer(t)
-	s.hosting = true
-	s.termLimits = limits
 	r := &termRig{s: s, now: now, secret: secret}
 	r.cookie = r.login(t, 0)
+	r.start(t, limits, prep)
+	return r
+}
+
+// start serves r.s, creates a record on node pc and runs it on a fake.
+func (r *termRig) start(t *testing.T, limits hosting.Admin, prep func(*Server)) {
+	t.Helper()
+	s := r.s
+	s.hosting = true
+	s.termLimits = limits
+	if prep != nil {
+		prep(s)
+	}
 	srv := httptest.NewServer(s.handler())
 	t.Cleanup(srv.Close)
 	r.base = srv.URL
 	token := nodeToken(t, s, "pc")
-	got := adminCall(t, r.base, "POST", "/api/admin/terminals", r.cookie, true, newRecord)
+	got := r.call(t, r.base, "POST", "/api/admin/terminals", newRecord)
 	var rec wire.HostedSession
 	if err := json.Unmarshal([]byte(got.body), &rec); err != nil {
 		t.Fatalf("create = %d %s", got.code, got.body)
@@ -57,8 +77,43 @@ func newTermRig(t *testing.T, limits hosting.Admin) *termRig {
 	}
 	r.fake = termtest.New()
 	attachNode(t, r.base, token, r.fake)
-	eventually(t, "the record running", func() bool { return terminals(t, r.base, r.cookie)[r.id].Runtime.State == "running" })
-	return r
+	eventually(t, "the record running", func() bool {
+		var list []wire.HostedSession
+		_ = json.Unmarshal([]byte(r.call(t, r.base, "GET", "/api/admin/terminals", "").body), &list)
+		for _, h := range list {
+			if h.ID == r.id {
+				return h.Runtime.State == "running"
+			}
+		}
+		return false
+	})
+}
+
+// call is an admin API request as the rig's admin (cookie and hdr).
+func (r *termRig) call(t *testing.T, base, method, path, body string, extra ...string) httpReply {
+	t.Helper()
+	req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Switchboard-Dashboard", "1")
+	for k, v := range r.hdr {
+		req.Header.Set(k, v)
+	}
+	for i := 0; i+1 < len(extra); i += 2 {
+		req.Header.Set(extra[i], extra[i+1])
+	}
+	if r.cookie != nil {
+		req.AddCookie(&http.Cookie{Name: r.cookie.Name, Value: r.cookie.Value})
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return httpReply{res.StatusCode, string(b)}
 }
 
 // login signs alice in with the TOTP code of step offset (a code is good once).

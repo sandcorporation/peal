@@ -55,6 +55,9 @@ func hostingStart(getenv func(string) string) (bool, error) {
 	if _, err := hostingRemote(getenv); err != nil {
 		failed = append(failed, err.Error())
 	}
+	if err := terminalStart(getenv); err != nil {
+		failed = append(failed, err.Error())
+	}
 	if mode := getenv(config.EnvPrefix + "ADMIN_AUTH"); !adminauth.SignsIn(mode) {
 		failed = append(failed, config.EnvPrefix+"ADMIN_AUTH must be builtin or oidc (got "+quoteOrUnset(mode)+")")
 	}
@@ -120,6 +123,16 @@ func hostingStub(w http.ResponseWriter) {
 // identified admin past the write guard: the records and the node list, and
 // the stub for the routes of later tickets.
 func (s *Server) hostingAdmin(w http.ResponseWriter, r *http.Request, path string) {
+	if terminalPath(path) {
+		switch code := s.terminalGate(r); code {
+		case http.StatusNotFound:
+			http.NotFound(w, r)
+			return
+		case http.StatusForbidden:
+			http.Error(w, "forbidden: client address outside "+config.EnvPrefix+config.HostingTerminalAllowName, http.StatusForbidden)
+			return
+		}
+	}
 	if path == "host-grants" {
 		s.hostingService().AdminGrantsAPI(w, r)
 		return
@@ -154,6 +167,7 @@ func (s *Server) hostingHub() *hosting.Hub {
 			return who.User, key, ok
 		}
 		a.Origin = s.liveOriginAllowed
+		a.ClientIP = func(r *http.Request) string { return s.adminAuth().ClientIP(r) }
 		s.nodeHub.SetAdmin(a)
 		bosses := make([]string, 0, len(s.bossRoles))
 		for r := range s.bossRoles {

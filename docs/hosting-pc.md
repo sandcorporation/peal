@@ -1107,6 +1107,9 @@ Providers that only speak OAuth 2.0 (GitHub and similar) are not supported: they
 | `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_ADMIN_AUTH must be builtin or oidc (got unset)` | `up` was started without `SWITCHBOARD_ADMIN_AUTH=builtin`; start it through `up.cmd` / the unit, or set the variable as in W5 / L5. |
 | `SWITCHBOARD_HOSTING=on refused: LISTEN_ADDR … is not a loopback address (127.0.0.0/8, ::1 or localhost)` | Hosting runs only on loopback. Start it with `switchboard up`, which listens on `127.0.0.1`; do not run the plain server with `SWITCHBOARD_HOSTING=on`. |
 | `SWITCHBOARD_HOSTING=on refused: DB_PATH is unset; name this instance's own database` / `DB_PATH is the container default /data/mail.db; …` | Same: use `switchboard up --data <dir>`. |
+| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL must be loopback, on or off (got …)` | Fix the value, or remove it for the default `loopback`. |
+| `SWITCHBOARD_HOSTING=on refused: SWITCHBOARD_HOSTING_TERMINAL=on needs admin sign-in: …` | Set `SWITCHBOARD_ADMIN_AUTH` (builtin or oidc) or `SWITCHBOARD_ADMIN_PROXY_TOKEN`, or use `loopback`. |
+| 「이 주소에서는 터미널이 꺼져 있음」 on the terminal screen | `SWITCHBOARD_HOSTING_TERMINAL` is `loopback` (the default) and the page is not opened from this machine directly, or it is `off`. |
 | `host: DB_PATH is unset; …` | `host` ran without `DB_PATH`; run it as `sbpc host …`. |
 | `profile "pc-worker" not found (…)` | The command ran without `SWITCHBOARD_CONFIG_DIR`; run it through `sbpc`. |
 | `node: agent CLI not found: SWITCHBOARD_HOSTING_AGENT="…"` | Set `SWITCHBOARD_HOSTING_AGENT` to the agent's full path (W3 `$agent` / L3 `AGENT`) and rewrite `up.cmd` (W6) or the unit (L6). |

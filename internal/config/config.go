@@ -174,6 +174,52 @@ func HostingRemoteAllow(getenv func(string) string) (allow []netip.Prefix, from 
 	if strings.TrimSpace(v) == "" {
 		v = DefaultHostingRemoteAllow
 	}
+	allow, err = parsePrefixes(v, from)
+	return allow, from, err
+}
+
+// Browser terminal access (#367): SWITCHBOARD_HOSTING_TERMINAL says where the
+// terminal's ticket and socket routes answer, and the optional
+// SWITCHBOARD_HOSTING_TERMINAL_ALLOW narrows the client addresses.
+const (
+	HostingTerminalName      = "HOSTING_TERMINAL"
+	HostingTerminalAllowName = "HOSTING_TERMINAL_ALLOW"
+
+	TerminalLoopback = "loopback" // loopback peers only, without proxy forwarding headers
+	TerminalOn       = "on"       // any listener and address, for a signed-in admin
+	TerminalOff      = "off"      // the routes answer 404
+
+	// DefaultHostingTerminal is the value when SWITCHBOARD_HOSTING_TERMINAL
+	// is unset.
+	DefaultHostingTerminal = TerminalLoopback
+)
+
+// HostingTerminal reads SWITCHBOARD_HOSTING_TERMINAL through getenv:
+// loopback, on or off, DefaultHostingTerminal when unset.
+func HostingTerminal(getenv func(string) string) (mode, from string, err error) {
+	v, from := EnvFrom(getenv, HostingTerminalName)
+	switch v = strings.TrimSpace(v); v {
+	case "":
+		return DefaultHostingTerminal, from, nil
+	case TerminalLoopback, TerminalOn, TerminalOff:
+		return v, from, nil
+	}
+	return "", from, fmt.Errorf("%s must be %s, %s or %s (got %q)", from, TerminalLoopback, TerminalOn, TerminalOff, v)
+}
+
+// HostingTerminalAllow reads SWITCHBOARD_HOSTING_TERMINAL_ALLOW through
+// getenv: a CIDR list, or nil (no limit) when unset or blank.
+func HostingTerminalAllow(getenv func(string) string) (allow []netip.Prefix, from string, err error) {
+	v, from := EnvFrom(getenv, HostingTerminalAllowName)
+	if strings.TrimSpace(v) == "" {
+		return nil, from, nil
+	}
+	allow, err = parsePrefixes(v, from)
+	return allow, from, err
+}
+
+// parsePrefixes parses a comma-separated CIDR list; from names the variable.
+func parsePrefixes(v, from string) (allow []netip.Prefix, err error) {
 	for _, part := range strings.Split(v, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
@@ -181,14 +227,14 @@ func HostingRemoteAllow(getenv func(string) string) (allow []netip.Prefix, from 
 		}
 		p, perr := netip.ParsePrefix(part)
 		if perr != nil {
-			return nil, from, fmt.Errorf("%s: %q is not a CIDR range such as 100.64.0.0/10", from, part) // leak-guard:allow
+			return nil, fmt.Errorf("%s: %q is not a CIDR range such as 192.0.2.0/24", from, part)
 		}
 		allow = append(allow, p.Masked())
 	}
 	if len(allow) == 0 {
-		return nil, from, fmt.Errorf("%s names no CIDR range", from)
+		return nil, fmt.Errorf("%s names no CIDR range", from)
 	}
-	return allow, from, nil
+	return allow, nil
 }
 
 // AddrAllowed reports whether a is inside one of allow (an IPv4-mapped IPv6

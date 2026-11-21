@@ -414,4 +414,6 @@ type TerminalLogEntry struct {
 	Kind      string `json:"kind"`
 	At        int64  `json:"at"`
 	Bytes     int    `json:"bytes"`
+	Mode      string `json:"mode,omitempty"` // the socket's view or input (#367)
+	IP        string `json:"ip,omitempty"`   // the client address (#367)
 }
