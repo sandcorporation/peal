@@ -213,6 +213,16 @@ func TestDashboardTerminalsTabOnlyWithHosting(t *testing.T) {
 		`if(!setViewHash[v]||(v==='nodes'&&!hostingOn))v='qsettings';`,
 		`api('nodes')`,
 		`apiSend('DELETE','nodes/'+encodeURIComponent(v.name))`,
+		// 예약 (#336): the record's scheduled runs over the admin API.
+		`['autos','예약']`,
+		`if(sub==='autos'){await termAutos(v,box);return}`,
+		`api('terminals/'+id+'/autos')`,
+		`autoAct(v,a,'POST','/run',`,
+		`autoAct(v,a,'POST','/pause',`,
+		`autoAct(v,a,'POST','/resume',`,
+		`autoAct(v,a,'DELETE','',`,
+		`되돌릴 수 없습니다`,
+		`node('pre',r.output)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
@@ -410,7 +420,7 @@ func TestDashboardTerminalsDetail(t *testing.T) {
 		"$('termAdd').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();$('termAdd').close()}});",
 		"detailRow(tr,'terminals',v.id);",
 		"registerDetail('terminals',{",
-		"subs:()=>[['screen','화면'],['log','기록'],['settings','설정']],",
+		"subs:()=>[['screen','화면'],['log','기록'],['autos','예약'],['settings','설정']],",
 		"add('지우기',()=>{if(confirm(",
 		"add('새 대화',()=>{if(confirm(",
 		"node('p','바꾼 설정은 다음 시작부터 적용','muted')",

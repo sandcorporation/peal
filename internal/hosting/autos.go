@@ -30,14 +30,14 @@ const (
 // another hosted session).
 var ErrNoSuchAuto = errors.New("no such scheduled run")
 
-const autoColumns = `id,session,cron,tz,prompt,label,resume,notify,state,next_fire_at,run_requested_at,created_at,updated_at,max_run_ms,precheck,precheck_timeout_ms`
+const autoColumns = `id,session,cron,tz,prompt,label,resume,notify,state,next_fire_at,run_requested_at,created_at,updated_at,max_run_ms,precheck,precheck_timeout_ms,alert`
 
 func scanAuto(r rowScanner) (wire.HostAuto, error) {
 	var a wire.HostAuto
 	var resume int
 	var notify string
 	var next, req sql.NullInt64
-	if err := r.Scan(&a.ID, &a.Session, &a.Cron, &a.TZ, &a.Prompt, &a.Label, &resume, &notify, &a.State, &next, &req, &a.CreatedAt, &a.UpdatedAt, &a.MaxRunMS, &a.Check, &a.CheckTimeoutMS); err != nil {
+	if err := r.Scan(&a.ID, &a.Session, &a.Cron, &a.TZ, &a.Prompt, &a.Label, &resume, &notify, &a.State, &next, &req, &a.CreatedAt, &a.UpdatedAt, &a.MaxRunMS, &a.Check, &a.CheckTimeoutMS, &a.Alert); err != nil {
 		return a, err
 	}
 	a.Resume = resume != 0
