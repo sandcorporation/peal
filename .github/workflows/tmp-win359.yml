@@ -1,0 +1,16 @@
+name: tmp-win359
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  win:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - shell: bash
+        run: go test -count=20 -timeout 15m -run 'TestRemoteNodeSessionsGetARoleCredential' ./internal/server/ && go test -count=20 -run 'Profiles' ./internal/node/
