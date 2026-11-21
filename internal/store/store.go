@@ -149,7 +149,22 @@ func Init(db *sql.DB) error {
 	if e = migrateHostAutoStops(db); e != nil {
 		return e
 	}
-	return migrateHostAutoChecks(db)
+	if e = migrateHostAutoChecks(db); e != nil {
+		return e
+	}
+	return migrateHostAutoAlerts(db)
+}
+
+// migrateHostAutoAlerts adds host_autos.alert (#336): the result (error,
+// timeout or overrun) a scheduled run was last alerted for and that has not
+// been resolved since; ” when none.
+func migrateHostAutoAlerts(db *sql.DB) error {
+	has, err := HasColumn(db, "host_autos", "alert")
+	if err != nil || has {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE host_autos ADD COLUMN alert TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // migrateHostAutoChecks adds host_autos.precheck and precheck_timeout_ms

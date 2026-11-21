@@ -87,8 +87,34 @@ func (d *Discord) NoticeQuestion(id, asker, header string) {
 	if d == nil {
 		return
 	}
+	d.send(d.questionNoticeLine(id, asker, header))
+}
+
+// NoticeScheduledRun sends, in the background, the alert of scheduled run
+// id of role (#336), linking to its session's 예약 tab: its result (error, timeout, overrun), or "풀림" with the
+// result that was alerted when was is set. It carries no label, prompt or
+// output.
+func (d *Discord) NoticeScheduledRun(id int64, session, role, result, was string) {
+	if d == nil {
+		return
+	}
+	if role == "" {
+		role = session // the hosted session is gone
+	}
+	line := fmt.Sprintf("예약 실행 %d · %s · %s", id, role, result)
+	if was != "" {
+		line = fmt.Sprintf("예약 실행 %d · %s · 풀림 (%s)", id, role, was)
+	}
+	if d.publicURL != "" {
+		line += " " + d.publicURL + "/#terminals/" + session + "/autos"
+	}
+	d.send(line)
+}
+
+// send posts content in the background; it never blocks the caller.
+func (d *Discord) send(content string) {
 	body, err := json.Marshal(discordPayload{
-		Content:         d.questionNoticeLine(id, asker, header),
+		Content:         content,
 		Username:        d.username,
 		AvatarURL:       d.avatarURL,
 		AllowedMentions: discordMentions{Parse: []string{}},

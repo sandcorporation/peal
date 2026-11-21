@@ -58,6 +58,8 @@ type Hub struct {
 	autoMail AutoMail
 	// autoMailDone tells whether a scheduled run's mail was completed.
 	autoMailDone AutoMailDone
+	// autoAlert tells about scheduled runs that need attention (#336).
+	autoAlert AutoAlert
 	// nodeLimit is the last usage limit each node reported; limited and
 	// limitKnown are the subscription limit as last published (#190).
 	nodeLimit  map[string]wire.NodeLimit

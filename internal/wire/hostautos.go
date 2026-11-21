@@ -49,7 +49,10 @@ type HostAuto struct {
 	Check          string `json:"check,omitempty"`
 	CheckTimeoutMS int64  `json:"check_timeout_ms,omitempty"`
 	State          string `json:"state"`
-	NextFireAt     *int64 `json:"next_fire_at"`
+	// Alert is the result (error, timeout, overrun) this run was alerted
+	// for and that has not been resolved since (#336); empty when none.
+	Alert      string `json:"alert,omitempty"`
+	NextFireAt *int64 `json:"next_fire_at"`
 	// RunRequestedAt is a `host auto run` the host has not handled yet.
 	RunRequestedAt *int64       `json:"run_requested_at,omitempty"`
 	CreatedAt      int64        `json:"created_at"`

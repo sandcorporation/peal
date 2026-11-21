@@ -136,6 +136,9 @@ func (h *Hub) fireAuto(a wire.HostAuto, at int64, manual bool) (wire.HostAutoRun
 		run.Result, run.Detail = result, detail
 		out, err := h.svc.addAutoRun(run)
 		h.publish("terminals")
+		if err == nil && autoRunFinal(out) {
+			h.alertAuto(out)
+		}
 		return out, err
 	}
 	rec, err := h.svc.Get(a.Session)
@@ -211,8 +214,12 @@ func (h *Hub) heldBy(rec wire.HostedSession) (*wire.HostAutoRun, error) {
 	if rec.Desired != DesiredRunning {
 		now := h.svc.clock().UnixMilli()
 		for _, r := range held {
-			if _, err := h.svc.endAutoRun(r.ID, now, "", "session stopped"); err != nil {
+			ended, err := h.svc.endAutoRun(r.ID, now, "", "session stopped")
+			if err != nil {
 				return nil, err
+			}
+			if ended {
+				h.alertAuto(r)
 			}
 		}
 		return nil, nil
@@ -259,6 +266,10 @@ func (h *Hub) StopAutoSessions() (int, error) {
 		}
 		if ended {
 			n++
+			if result != "" {
+				r.Result = result
+			}
+			h.alertAuto(r)
 		}
 	}
 	if stopped {

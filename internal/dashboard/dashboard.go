@@ -116,6 +116,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13.5px/1.55 var(--font-mono
 .termbar{margin-bottom:var(--space-2)}
 .termbar #termMode{margin-left:auto}
 .detail-acts{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)}
+.auto{margin-bottom:var(--space-4);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-line)}
+.auto h3 .sc-badge{margin-left:var(--space-1)}
 .settings-form.termform{margin-top:0;padding-top:0;border-top:0;max-width:none}
 .sc-app-main.has-detail.detail-wide{grid-template-columns:minmax(0,1fr)}
 .detail-wide>.sc-topbar,.detail-wide>.sc-app-page{display:none}
@@ -1778,16 +1780,93 @@ function termSettings(v,box){
   };
   box.append(f,node('p','바꾼 설정은 다음 시작부터 적용','muted'));
 }
+// ---- 예약 (#336): the record's scheduled runs and their recent runs ----
+const autoResult={fired:'실행',skipped:'건너뜀',error:'오류',timeout:'시간 초과',overrun:'시간 넘김',busy:'겹침',waiting:'대기','node-offline':'노드 꺼짐'};
+const autoTone={fired:'success',skipped:'neutral',error:'danger',timeout:'danger',overrun:'danger',busy:'warning',waiting:'warning','node-offline':'warning'};
+function autoBadge(r){return badge(autoResult[r]||r,autoTone[r]||'neutral')}
+// autoOpen holds the first run id of each skipped stretch the viewer opened.
+const autoOpen=new Set();
+// autoGroups folds runs of two or more skipped in a row into one group.
+function autoGroups(runs){
+  const out=[];
+  for(const r of runs){
+    const g=out[out.length-1];
+    if(r.result==='skipped'&&g&&g.skipped)g.runs.push(r);
+    else out.push({skipped:r.result==='skipped',runs:[r]});
+  }
+  return out;
+}
+function autoRunRow(body,labels,r){
+  const tr=node('tr','');
+  const res=node('td','','nowrap');res.append(autoBadge(r.result));
+  if(r.exit_code!==null&&r.exit_code!==undefined)res.append(' '+r.exit_code);
+  if(r.manual)res.append(' 수동');
+  const det=node('td',r.detail||(r.output?'':'-'),'wrap');
+  if(r.output){const d=document.createElement('details');d.append(node('summary','출력'),node('pre',r.output));det.append(d)}
+  [node('td',when(r.at),'nowrap'),res,det].forEach((td,i)=>{if(i>0)td.dataset.label=labels[i];tr.append(td)});
+  body.append(tr);
+}
+function autoRuns(runs){
+  const labels=['시각','결과','상세'];
+  const tbl=node('table','','stack list autoruns'),head=node('tr','');
+  for(const h of labels)head.append(node('th',h));
+  const thead=document.createElement('thead');thead.append(head);
+  const body=document.createElement('tbody');
+  for(const g of autoGroups(runs)){
+    const first=g.runs[0];
+    if(!g.skipped||g.runs.length<2||autoOpen.has(first.id)){for(const r of g.runs)autoRunRow(body,labels,r);continue}
+    const tr=node('tr',''),t=node('td',when(g.runs[g.runs.length-1].at)+' ~ '+when(first.at),'wrap');
+    const res=node('td','');res.dataset.label=labels[1];res.colSpan=2;
+    const more=node('button','건너뜀 '+g.runs.length+'회');more.type='button';
+    more.onclick=()=>{autoOpen.add(first.id);drawDetail()};
+    res.append(more);
+    tr.append(t,res);body.append(tr);
+  }
+  if(!runs.length)emptyRow(body,labels.length,'기록 없음');
+  tbl.append(thead,body);return tbl;
+}
+async function autoAct(v,a,method,path,done){
+  try{
+    await apiSend(method,'terminals/'+encodeURIComponent(v.id)+'/autos/'+a.id+path);
+    termNote={id:v.id,text:done,cls:'ok'};
+  }catch(e){termNote={id:v.id,text:e.message,cls:'err'}}
+  drawDetail();
+}
+function autoName(a){return a.label||'예약 실행 '+a.id}
+async function termAutos(v,box){
+  const id=encodeURIComponent(v.id);
+  const list=await api('terminals/'+id+'/autos');
+  if(!list.length){box.append(node('p','예약 실행 없음','muted'));return}
+  const views=await Promise.all(list.map(a=>api('terminals/'+id+'/autos/'+a.id+'?runs=20')));
+  for(const a of views){
+    const sec=node('section','','auto');sec.id='auto-'+a.id;
+    const h=node('h3',autoName(a)+' ');
+    h.append(badge(a.state==='paused'?'멈춤':'활성',a.state==='paused'?'warning':'success'));
+    if(a.alert){const b=autoBadge(a.alert);b.title='알림 중';h.append(' ',b)}
+    sec.append(h);
+    const pairs=[['cron',a.cron+' ('+a.tz+')'],['다음',a.state==='paused'?'-':when(a.next_fire_at)],['사전 확인',a.check?node('code',a.check):'-'],['대화',a.resume?'이어서':'새 대화'],['최대 실행',Math.round(a.max_run_ms/60000)+'분'],['알림 받는 역할',(a.notify||[]).join(', ')||'-'],['프롬프트',node('pre',a.prompt)]];
+    sec.append(dl(pairs));
+    const acts=node('div','','detail-acts');
+    const add=(label,fn)=>{const b=node('button',label);b.type='button';b.onclick=fn;acts.append(b)};
+    add('지금 실행',()=>autoAct(v,a,'POST','/run',autoName(a)+' 실행'));
+    if(a.state==='paused')add('다시',()=>autoAct(v,a,'POST','/resume',autoName(a)+' 다시'));
+    else add('멈춤',()=>autoAct(v,a,'POST','/pause',autoName(a)+' 멈춤'));
+    add('지우기',()=>{if(confirm(autoName(a)+'을(를) 지울까요? 실행 기록도 함께 지워지고 되돌릴 수 없습니다.'))autoAct(v,a,'DELETE','',autoName(a)+' 삭제')});
+    sec.append(acts,autoRuns(a.runs||[]));
+    box.append(sec);
+  }
+}
 const termLoad=async id=>(await api('terminals')).find(v=>v.id===id)||null;
 registerDetail('terminals',{
   list:'터미널',
   load:termLoad,
   head:v=>{const st=termSt(v);return {title:termRole(v)+(v.label?' · '+v.label:''),badge:[termState[st]||st,termTone[termStClass(st)]||'neutral']}},
-  subs:()=>[['screen','화면'],['log','기록'],['settings','설정']],
+  subs:()=>[['screen','화면'],['log','기록'],['autos','예약'],['settings','설정']],
   draw:async(v,sub,box)=>{
     termActs(v,box);
     if(sub==='log'){await termHistory(v,box);return}
     if(sub==='settings'){termSettings(v,box);return}
+    if(sub==='autos'){await termAutos(v,box);return}
     box.append(termPaneFor(v));
   }
 });

@@ -155,6 +155,7 @@ func (s *Server) hostingHub() *hosting.Hub {
 		s.nodeHub.SetNotify(s.hostingNotify, bosses)
 		s.nodeHub.SetAutoMail(s.hostingAutoMail)
 		s.nodeHub.SetAutoMailDone(func(id int64) (bool, error) { return mail.Completed(s.db, id) })
+		s.nodeHub.SetAutoAlert(s.hostingAutoAlert)
 		s.nodeHub.SetSlotOf(s.hostingSlotOf)
 	})
 	return s.nodeHub
@@ -209,6 +210,45 @@ func (s *Server) hostingNotify(to []string, subject, body, key string) error {
 		s.hub.Publish(box)
 	}
 	return nil
+}
+
+// hostingAutoAlert is the hub's AutoAlert (#336): a Discord notice, and a
+// system mail to each of the scheduled run's notify roles, idempotent by
+// the run.
+func (s *Server) hostingAutoAlert(n hosting.AutoNotice) {
+	a := n.Auto
+	was := ""
+	if n.Resolved {
+		was = n.Was
+	}
+	s.discord.NoticeScheduledRun(a.ID, a.Session, n.Role, n.Run.Result, was)
+	if len(a.Notify) == 0 {
+		return
+	}
+	name := a.Label
+	if name == "" {
+		name = fmt.Sprintf("scheduled run %d", a.ID)
+	}
+	at := time.UnixMilli(n.Run.At).UTC().Format(time.RFC3339)
+	var subject, body string
+	if n.Resolved {
+		subject = fmt.Sprintf("scheduled run resolved: %s (was %s)", name, n.Was)
+		body = fmt.Sprintf("Scheduled run %d of hosted session %s (%s) ran %s at %s, after %s.", a.ID, a.Session, n.Role, n.Run.Result, at, n.Was)
+	} else {
+		subject = fmt.Sprintf("scheduled run %s: %s", n.Run.Result, name)
+		body = fmt.Sprintf("Scheduled run %d of hosted session %s (%s) ended %s at %s (run %d).", a.ID, a.Session, n.Role, n.Run.Result, at, n.Run.ID)
+		if n.Run.Detail != "" {
+			body += "\n\n" + n.Run.Detail
+		}
+		if n.Run.Output != "" {
+			body += "\n\nPrecheck output (end):\n" + n.Run.Output
+		}
+		body += "\n\nFurther runs with the same result are not mailed; a fired or skipped run sends \"resolved\"."
+	}
+	key := fmt.Sprintf("hostauto-alert:%d:%d", a.ID, n.Run.ID)
+	if err := s.hostingNotify(a.Notify, subject, body, key); err != nil {
+		log.Printf("hosting: scheduled run %d alert mail: %v", a.ID, err)
+	}
 }
 
 // hostingAutoMail is the hub's AutoMail: one system mail to role's mailbox,
